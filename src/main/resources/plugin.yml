@@ -1,0 +1,44 @@
+name: RexGraves
+version: '${project.version}'
+main: me.rexsystems.rexGraves.RexGraves
+api-version: '1.20'
+folia-supported: true
+authors: [RexSystems]
+description: Modern death graves for Paper servers
+website: https://rexsystems.me
+softdepend: [PlaceholderAPI]
+
+commands:
+  rexgraves:
+    description: Main RexGraves command
+    aliases: [rg, graves, grave]
+    usage: /rexgraves <help|list|locate|tp|compass|reload|admin>
+
+permissions:
+  rexgraves.use:
+    description: Create and open your own graves
+    default: true
+  rexgraves.list:
+    description: List your graves
+    default: true
+  rexgraves.locate:
+    description: Locate your nearest grave
+    default: true
+  rexgraves.teleport:
+    description: Teleport to your graves
+    default: op
+  rexgraves.compass:
+    description: Point compass to a grave
+    default: true
+  rexgraves.reload:
+    description: Reload plugin configuration
+    default: op
+  rexgraves.admin:
+    description: Admin access to all graves and commands
+    default: op
+  rexgraves.bypass:
+    description: Open other players' graves
+    default: op
+  rexgraves.break:
+    description: Break grave markers
+    default: op

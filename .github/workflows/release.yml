@@ -1,0 +1,105 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to release (e.g. v1.0.0)'
+        required: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: maven
+
+      - name: Determine version from tag
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing tag=$TAG version=$VERSION"
+
+      - name: Build with Maven
+        run: |
+          mvn -B -ntp clean package \
+            -Drevision=${{ steps.version.outputs.version }} \
+            --no-transfer-progress
+
+      - name: Locate built JAR
+        id: jar
+        run: |
+          JAR=$(ls target/*.jar | grep -v 'original-' | grep -v 'sources' | grep -v 'javadoc' | head -n 1)
+          if [ -z "$JAR" ]; then
+            echo "::error::No JAR found in target/"
+            exit 1
+          fi
+          echo "path=$JAR" >> "$GITHUB_OUTPUT"
+          echo "Built JAR: $JAR"
+
+      - name: Publish to GitHub Release & Modrinth
+        uses: Kir-Antipov/mc-publish@v3.3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-tag: ${{ steps.version.outputs.tag }}
+          github-generate-changelog: false
+          github-draft: false
+          github-prerelease: false
+
+          modrinth-id: rexgraves
+          modrinth-token: ${{ secrets.MODRINTH_TOKEN }}
+          modrinth-featured: true
+          modrinth-unfeature-mode: subset
+
+          name: RexGraves ${{ steps.version.outputs.version }}
+          version: ${{ steps.version.outputs.version }}
+          version-type: release
+          files: ${{ steps.jar.outputs.path }}
+          changelog-file: CHANGELOG.md
+
+          loaders: |
+            paper
+            purpur
+            folia
+            bukkit
+            spigot
+
+          game-versions: |
+            >=1.20.4
+          game-version-filter: releases
+
+          java: |
+            21
+
+          retry-attempts: 2
+          retry-delay: 10000
+          fail-mode: fail

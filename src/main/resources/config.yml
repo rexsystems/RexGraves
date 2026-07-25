@@ -1,0 +1,97 @@
+# RexGraves configuration
+# Messages use MiniMessage. Legacy & codes and &#RRGGBB / #RRGGBB also work.
+
+# Internal. Do not change unless you know what you are doing.
+config-version: 1
+
+settings:
+  # Create a grave when a player dies
+  enabled: true
+  # Store XP in the grave and restore it when looted
+  store-experience: true
+  # Percent of XP to store (0-100)
+  experience-percent: 100
+  # How long graves last, in seconds. 0 = never expire
+  expiration-seconds: 3600
+  # When a grave expires: drop | destroy
+  expire-action: drop
+  # Max active graves per player. 0 = unlimited
+  max-graves-per-player: 0
+  # When at max, remove the oldest grave first
+  remove-oldest-when-full: true
+  # Right-click dumps items straight into inventory instead of opening a GUI
+  auto-loot: false
+  # Try to put armor pieces back into armor slots when looting
+  auto-equip-armor: true
+  # Protect graves from explosions
+  protect-from-explosions: true
+  # Only the owner (or bypass) can open a grave
+  owner-only: true
+  # Spawn a player head on the grave marker
+  player-head: true
+  # Small floating marker entity
+  small-marker: true
+  # Particle effect at graves
+  particles: true
+  # Sound when a grave is created
+  create-sound: BLOCK_ENCHANTMENT_TABLE_USE
+  # Sound when a grave is looted
+  loot-sound: BLOCK_CHEST_OPEN
+
+# Worlds where graves are never created
+disabled-worlds:
+  - world_nether_example
+
+# Worlds listed here use a whitelist instead of the blacklist above
+# Leave empty to use disabled-worlds only
+enabled-worlds: []
+
+hologram:
+  enabled: true
+  # Offset above the grave marker
+  offset-y: 1.35
+  # Line spacing
+  line-spacing: 0.28
+  # Placeholders: {player} {owner} {items} {xp} {world} {x} {y} {z} {id}
+  # {time_left} {time_since} {since_died} {died_ago}
+  # PlaceholderAPI placeholders also work when PAPI is installed
+  lines:
+    - "<gradient:#8B7355:#C4A574><bold>{player}'s Grave</bold></gradient>"
+    - "<gray>Items: <white>{items}</white> · XP: <white>{xp}</white></gray>"
+    - "<gray>Died <white>{time_since}</white> ago</gray>"
+    - "<dark_gray>Expires in {time_left}</dark_gray>"
+
+gui:
+  title: "<gradient:#8B7355:#C4A574>{player}'s Grave</gradient>"
+  # Inventory size: 9, 18, 27, 36, 45, or 54
+  size: 54
+
+messages:
+  prefix: "<gradient:#8B7355:#C4A574><bold>RexGraves</bold></gradient> <dark_gray>»</dark_gray> "
+  no-permission: "<prefix><red>You don't have permission.</red>"
+  reload: "<prefix><green>Configuration reloaded.</green>"
+  created: "<prefix><gray>A grave was created at <white>{x}</white>, <white>{y}</white>, <white>{z}</white> in <white>{world}</white>.</gray>"
+  created-xp: "<prefix><gray>Your grave holds <white>{xp}</white> XP.</gray>"
+  looted: "<prefix><green>You recovered your grave.</green>"
+  looted-partial: "<prefix><yellow>Some items didn't fit. Your grave still has the rest.</yellow>"
+  looted-xp: "<prefix><gray>Restored <white>{xp}</white> XP.</gray>"
+  denied: "<prefix><red>That grave belongs to <white>{owner}</white>.</red>"
+  not-found: "<prefix><red>Grave not found.</red>"
+  none: "<prefix><gray>You have no active graves.</gray>"
+  list-header: "<prefix><gray>Your graves <dark_gray>(</dark_gray><white>{count}</white><dark_gray>)</dark_gray>:</gray>"
+  list-entry: "<dark_gray>-</dark_gray> <white>#{index}</white> <gray>{world}</gray> <dark_gray>@</dark_gray> <white>{x}</white>, <white>{y}</white>, <white>{z}</white> <dark_gray>·</dark_gray> <gray>{time_left}</gray>"
+  locate: "<prefix><gray>Nearest grave: <white>{world}</white> <dark_gray>@</dark_gray> <white>{x}</white>, <white>{y}</white>, <white>{z}</white> <dark_gray>(</dark_gray><white>{distance}</white>m<dark_gray>)</dark_gray></gray>"
+  teleported: "<prefix><green>Teleported to grave #{index}.</green>"
+  compass: "<prefix><gray>Compass now points to grave #{index}.</gray>"
+  expired: "<prefix><yellow>One of your graves expired.</yellow>"
+  removed: "<prefix><gray>Grave removed.</gray>"
+  admin-list-header: "<prefix><gray>Graves for <white>{player}</white> <dark_gray>(</dark_gray><white>{count}</white><dark_gray>)</dark_gray>:</gray>"
+  admin-removed: "<prefix><green>Removed grave <white>{id}</white>.</green>"
+  disabled-world: "<prefix><red>Graves are disabled in this world.</red>"
+  keep-inventory: "<prefix><gray>Keep inventory is on - no grave was created.</gray>"
+  empty-death: "<prefix><gray>Nothing to store - no grave was created.</gray>"
+  help-header: "<prefix><gray>Commands:</gray>"
+  help-line: "<dark_gray>•</dark_gray> <white>/rexgraves {command}</white> <dark_gray>-</dark_gray> <gray>{description}</gray>"
+  time-never: "Never expires"
+  time-expired: "Expired"
+  time-format: "{hours}h {minutes}m {seconds}s"
