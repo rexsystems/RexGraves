@@ -9,9 +9,7 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.inventory.ItemStack;
-
-import java.util.ArrayList;
-import java.util.List;
+import org.bukkit.inventory.PlayerInventory;
 
 public class DeathListener implements Listener {
 
@@ -43,10 +41,15 @@ public class DeathListener implements Listener {
             return;
         }
 
-        List<ItemStack> drops = new ArrayList<>();
-        for (ItemStack drop : event.getDrops()) {
-            if (drop != null && !drop.getType().isAir()) {
-                drops.add(drop.clone());
+        PlayerInventory inventory = player.getInventory();
+        ItemStack[] contents = inventory.getContents();
+        ItemStack[] snapshot = new ItemStack[contents.length];
+        boolean hasItems = false;
+        for (int i = 0; i < contents.length; i++) {
+            ItemStack item = contents[i];
+            if (item != null && !item.getType().isAir()) {
+                snapshot[i] = item.clone();
+                hasItems = true;
             }
         }
 
@@ -57,16 +60,19 @@ public class DeathListener implements Listener {
             xpToStore = (int) Math.floor(total * (percent / 100.0));
         }
 
-        if (drops.isEmpty() && xpToStore <= 0) {
+        if (!hasItems && xpToStore <= 0) {
             MessageService.send(player, plugin.getConfigManager().prefixed("empty-death"));
             return;
         }
 
+        // Keep exact slots: stop vanilla drops, then clear the inventory ourselves.
+        event.setKeepInventory(true);
         event.getDrops().clear();
         if (plugin.getConfigManager().storeExperience()) {
             event.setDroppedExp(0);
         }
+        inventory.clear();
 
-        plugin.getGraveManager().createFromDeath(player, drops, xpToStore);
+        plugin.getGraveManager().createFromDeath(player, snapshot, xpToStore);
     }
 }

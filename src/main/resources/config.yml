@@ -19,9 +19,9 @@ settings:
   max-graves-per-player: 0
   # When at max, remove the oldest grave first
   remove-oldest-when-full: true
-  # Right-click dumps items straight into inventory instead of opening a GUI
+  # If true, normal right-click takes everything (same as shift+right-click)
   auto-loot: false
-  # Try to put armor pieces back into armor slots when looting
+  # Try to put armor into armor slots when shift-looting if the slot is free
   auto-equip-armor: true
   # Protect graves from explosions
   protect-from-explosions: true
@@ -50,9 +50,9 @@ hologram:
   enabled: true
   # Offset above the grave marker
   offset-y: 1.35
-  # Line spacing
+  # Unused for single multi-line holograms (kept for compatibility)
   line-spacing: 0.28
-  # Placeholders: {player} {owner} {items} {xp} {world} {x} {y} {z} {id}
+  # One hologram, multiple lines. Placeholders: {player} {owner} {items} {xp} {world} {x} {y} {z} {id}
   # {time_left} {time_since} {since_died} {died_ago}
   # PlaceholderAPI placeholders also work when PAPI is installed
   lines:

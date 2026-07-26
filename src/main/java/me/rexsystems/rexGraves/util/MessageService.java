@@ -22,7 +22,8 @@ public final class MessageService {
             LegacyComponentSerializer.legacySection();
 
     private static final Pattern HEX_AMP = Pattern.compile("&#([A-Fa-f0-9]{6})");
-    private static final Pattern HEX_HASH = Pattern.compile("(?<!<)#([A-Fa-f0-9]{6})");
+    // Match standalone #RRGGBB, but never MiniMessage color args like gradient:#RRGGBB or <#RRGGBB>
+    private static final Pattern HEX_HASH = Pattern.compile("(?<![<:])#([A-Fa-f0-9]{6})");
 
     private MessageService() {
     }

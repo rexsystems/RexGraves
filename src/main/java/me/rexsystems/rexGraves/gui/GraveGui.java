@@ -14,6 +14,9 @@ import org.jetbrains.annotations.NotNull;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * Grave loot GUI mirroring the stored inventory slot layout.
+ */
 public class GraveGui implements InventoryHolder {
 
     private final RexGraves plugin;
@@ -27,7 +30,11 @@ public class GraveGui implements InventoryHolder {
         placeholders.put("player", grave.getOwnerName());
         placeholders.put("owner", grave.getOwnerName());
         Component title = MessageService.parse(plugin.getConfigManager().guiTitle(), placeholders);
-        this.inventory = Bukkit.createInventory(this, plugin.getConfigManager().guiSize(), title);
+
+        int needed = Math.max(grave.getItems().length, 9);
+        int size = Math.max(plugin.getConfigManager().guiSize(), ((needed + 8) / 9) * 9);
+        size = Math.min(54, Math.max(9, size));
+        this.inventory = Bukkit.createInventory(this, size, title);
         fill();
     }
 
@@ -52,13 +59,18 @@ public class GraveGui implements InventoryHolder {
     }
 
     public void syncFromInventory() {
-        ItemStack[] contents = inventory.getContents();
-        ItemStack[] compact = new ItemStack[contents.length];
-        for (int i = 0; i < contents.length; i++) {
-            ItemStack item = contents[i];
-            compact[i] = item == null || item.getType().isAir() ? null : item.clone();
+        ItemStack[] original = grave.getItems();
+        int length = Math.max(original.length, inventory.getSize());
+        ItemStack[] synced = new ItemStack[length];
+
+        for (int i = 0; i < inventory.getSize(); i++) {
+            ItemStack item = inventory.getItem(i);
+            synced[i] = item == null || item.getType().isAir() ? null : item.clone();
         }
-        grave.setItems(compact);
+        for (int i = inventory.getSize(); i < original.length; i++) {
+            synced[i] = original[i] == null ? null : original[i].clone();
+        }
+        grave.setItems(synced);
     }
 
     @Override

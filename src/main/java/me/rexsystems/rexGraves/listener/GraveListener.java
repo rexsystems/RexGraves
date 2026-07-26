@@ -3,8 +3,10 @@ package me.rexsystems.rexGraves.listener;
 import me.rexsystems.rexGraves.RexGraves;
 import me.rexsystems.rexGraves.grave.Grave;
 import me.rexsystems.rexGraves.gui.GraveGui;
+import me.rexsystems.rexGraves.util.GraveKeys;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Interaction;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
@@ -17,6 +19,7 @@ import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.inventory.EquipmentSlot;
 
 import java.util.Optional;
 
@@ -29,28 +32,45 @@ public class GraveListener implements Listener {
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void onInteractEntity(PlayerInteractAtEntityEvent event) {
+    public void onInteractAtEntity(PlayerInteractAtEntityEvent event) {
+        if (event.getHand() != EquipmentSlot.HAND) {
+            return;
+        }
         handleInteract(event.getPlayer(), event.getRightClicked(), event);
     }
 
     @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
-    public void onInteractEntityLegacy(PlayerInteractEntityEvent event) {
+    public void onInteractEntity(PlayerInteractEntityEvent event) {
         if (event instanceof PlayerInteractAtEntityEvent) {
+            return;
+        }
+        if (event.getHand() != EquipmentSlot.HAND) {
             return;
         }
         handleInteract(event.getPlayer(), event.getRightClicked(), event);
     }
 
     private void handleInteract(Player player, Entity entity, org.bukkit.event.Cancellable event) {
-        if (!(entity instanceof ArmorStand)) {
-            return;
-        }
-        Optional<Grave> graveOpt = plugin.getGraveManager().byMarker(entity.getUniqueId());
+        Optional<Grave> graveOpt = resolveGrave(entity);
         if (graveOpt.isEmpty()) {
             return;
         }
         event.setCancelled(true);
-        plugin.getGraveManager().openGrave(player, graveOpt.get());
+        plugin.getGraveManager().openGrave(player, graveOpt.get(), player.isSneaking());
+    }
+
+    private Optional<Grave> resolveGrave(Entity entity) {
+        if (entity instanceof ArmorStand || entity instanceof Interaction) {
+            Optional<Grave> byMarker = plugin.getGraveManager().byMarker(entity.getUniqueId());
+            if (byMarker.isPresent()) {
+                return byMarker;
+            }
+            String tagged = GraveKeys.readGraveId(entity.getPersistentDataContainer(), plugin);
+            if (tagged != null) {
+                return plugin.getGraveManager().get(tagged);
+            }
+        }
+        return Optional.empty();
     }
 
     @EventHandler(ignoreCancelled = true)
@@ -63,10 +83,11 @@ public class GraveListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onDamage(EntityDamageEvent event) {
-        if (!(event.getEntity() instanceof ArmorStand stand)) {
+        Entity damaged = event.getEntity();
+        if (!(damaged instanceof ArmorStand) && !(damaged instanceof Interaction)) {
             return;
         }
-        Optional<Grave> graveOpt = plugin.getGraveManager().byMarker(stand.getUniqueId());
+        Optional<Grave> graveOpt = resolveGrave(damaged);
         if (graveOpt.isEmpty()) {
             return;
         }
@@ -75,9 +96,8 @@ public class GraveListener implements Listener {
         if (event instanceof EntityDamageByEntityEvent byEntity) {
             Player breaker = resolvePlayer(byEntity.getDamager());
             if (breaker != null && breaker.hasPermission("rexgraves.break")) {
-                Grave grave = graveOpt.get();
                 boolean drop = breaker.isSneaking();
-                plugin.getGraveManager().removeGrave(grave, true, drop);
+                plugin.getGraveManager().removeGrave(graveOpt.get(), true, drop);
             }
         }
     }

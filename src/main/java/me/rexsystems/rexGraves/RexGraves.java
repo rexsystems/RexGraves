@@ -39,8 +39,8 @@ public final class RexGraves extends JavaPlugin {
                 pluginCommand.setTabCompleter(command);
             }
 
-            // Tick graves every 5 seconds (100 ticks)
-            SchedulerUtils.runAtFixedRate(this, () -> graveManager.tick(), 100L, 100L);
+            // Tick graves every second (hologram timers)
+            SchedulerUtils.runAtFixedRate(this, () -> graveManager.tick(), 20L, 20L);
 
             new Metrics(this, BSTATS_PLUGIN_ID);
 

@@ -14,6 +14,7 @@ import org.bukkit.Particle;
 import org.bukkit.Sound;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
+import org.bukkit.entity.Interaction;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.EquipmentSlot;
@@ -114,7 +115,7 @@ public class GraveManager {
         return list;
     }
 
-    public Grave createFromDeath(Player player, List<ItemStack> drops, int experienceToStore) {
+    public Grave createFromDeath(Player player, ItemStack[] snapshot, int experienceToStore) {
         Location safe = LocationUtil.findSafeGraveLocation(player.getLocation());
         enforceMaxGraves(player.getUniqueId());
 
@@ -122,7 +123,7 @@ public class GraveManager {
         long expirationSeconds = plugin.getConfigManager().expirationSeconds();
         long expiresAt = expirationSeconds <= 0 ? 0L : now + (expirationSeconds * 1000L);
 
-        ItemStack[] items = drops.toArray(new ItemStack[0]);
+        ItemStack[] items = snapshot == null ? new ItemStack[0] : snapshot;
         String id = UUID.randomUUID().toString().substring(0, 8);
         Grave grave = new Grave(
                 id,
@@ -176,10 +177,11 @@ public class GraveManager {
         clearNearbyTagged(location, grave.getId());
         removeVisuals(grave, false);
 
+        // Visual marker. marker=false so it keeps a hitbox as a click fallback.
         ArmorStand marker = location.getWorld().spawn(location, ArmorStand.class, stand -> {
             stand.setVisible(false);
             stand.setGravity(false);
-            stand.setMarker(true);
+            stand.setMarker(false);
             stand.setSmall(plugin.getConfigManager().smallMarker());
             stand.setBasePlate(false);
             stand.setArms(false);
@@ -214,8 +216,19 @@ public class GraveManager {
             }
         });
 
+        // Dedicated click hitbox (ArmorStand marker=true has no hitbox).
+        Interaction clickBox = location.getWorld().spawn(location.clone().add(0, 0.1, 0), Interaction.class, interaction -> {
+            interaction.setInteractionWidth(1.0f);
+            interaction.setInteractionHeight(1.5f);
+            interaction.setResponsive(true);
+            interaction.setPersistent(true);
+            interaction.setInvulnerable(true);
+            GraveKeys.tagGrave(interaction.getPersistentDataContainer(), plugin, grave.getId());
+        });
+
         grave.setMarkerUuid(marker.getUniqueId());
         markerIndex.put(marker.getUniqueId(), grave.getId());
+        markerIndex.put(clickBox.getUniqueId(), grave.getId());
 
         List<UUID> holograms = hologram.spawn(grave);
         grave.setHologramUuids(holograms);
@@ -235,7 +248,7 @@ public class GraveManager {
                 continue;
             }
             if (tagged.equals(graveId) || !graves.containsKey(tagged)) {
-                if (entity instanceof ArmorStand || entity instanceof TextDisplay) {
+                if (entity instanceof ArmorStand || entity instanceof TextDisplay || entity instanceof Interaction) {
                     markerIndex.remove(entity.getUniqueId());
                     entity.remove();
                 }
@@ -244,6 +257,10 @@ public class GraveManager {
     }
 
     public void removeVisuals(Grave grave, boolean clearIndex) {
+        Location location = grave.getLocation();
+        if (location != null) {
+            clearNearbyTagged(location, grave.getId());
+        }
         hologram.remove(grave);
         UUID markerUuid = grave.getMarkerUuid();
         if (markerUuid != null) {
@@ -258,7 +275,10 @@ public class GraveManager {
         }
     }
 
-    public void openGrave(Player player, Grave grave) {
+    /**
+     * @param takeAll true for shift+right-click (restore arranged inventory + XP)
+     */
+    public void openGrave(Player player, Grave grave, boolean takeAll) {
         if (!canAccess(player, grave)) {
             Map<String, String> placeholders = placeholders(grave, 1);
             MessageService.send(player, plugin.getConfigManager().prefixed("denied"), placeholders);
@@ -266,30 +286,26 @@ public class GraveManager {
         }
 
         playLootSound(player.getLocation());
+        giveExperience(player, grave);
+        hologram.update(grave);
 
-        if (plugin.getConfigManager().autoLoot()) {
-            autoLoot(player, grave);
+        if (takeAll || plugin.getConfigManager().autoLoot()) {
+            boolean partial = restoreItemsArranged(player, grave);
+            if (grave.isEmpty()) {
+                MessageService.send(player, plugin.getConfigManager().prefixed("looted"), placeholders(grave, 1));
+                removeGrave(grave, false, false);
+            } else {
+                if (partial) {
+                    MessageService.send(player, plugin.getConfigManager().prefixed("looted-partial"), placeholders(grave, 1));
+                }
+                hologram.update(grave);
+                save();
+            }
             return;
         }
 
         GraveGui gui = new GraveGui(plugin, grave);
         gui.open(player);
-    }
-
-    public void autoLoot(Player player, Grave grave) {
-        boolean partial = giveItems(player, grave);
-        giveExperience(player, grave);
-
-        if (grave.isEmpty()) {
-            MessageService.send(player, plugin.getConfigManager().prefixed("looted"), placeholders(grave, 1));
-            removeGrave(grave, true, false);
-        } else {
-            if (partial) {
-                MessageService.send(player, plugin.getConfigManager().prefixed("looted-partial"), placeholders(grave, 1));
-            }
-            hologram.update(grave);
-            save();
-        }
     }
 
     public void handleGuiClose(Player player, GraveGui gui) {
@@ -299,43 +315,63 @@ public class GraveManager {
         }
 
         gui.syncFromInventory();
-        boolean hadXp = grave.getExperience() > 0;
-        giveExperience(player, grave);
 
         if (grave.isEmpty()) {
             MessageService.send(player, plugin.getConfigManager().prefixed("looted"), placeholders(grave, 1));
             removeGrave(grave, false, false);
         } else {
-            if (hadXp) {
-                // XP message already sent inside giveExperience
-            }
             hologram.update(grave);
             save();
         }
     }
 
-    private boolean giveItems(Player player, Grave grave) {
+    /**
+     * Put items back into the same inventory slots when free; otherwise overflow into free space.
+     */
+    private boolean restoreItemsArranged(Player player, Grave grave) {
         ItemStack[] items = grave.getItems();
-        List<ItemStack> remaining = new ArrayList<>();
+        ItemStack[] remaining = new ItemStack[items.length];
         boolean overflow = false;
-
         PlayerInventory inv = player.getInventory();
-        for (ItemStack item : items) {
+
+        for (int i = 0; i < items.length; i++) {
+            ItemStack item = items[i];
             if (item == null || item.getType().isAir()) {
+                remaining[i] = null;
                 continue;
             }
+
             ItemStack clone = item.clone();
+            ItemStack current = null;
+            try {
+                current = inv.getItem(i);
+            } catch (Exception ignored) {
+            }
+
+            if (isEmpty(current)) {
+                try {
+                    inv.setItem(i, clone);
+                    remaining[i] = null;
+                    continue;
+                } catch (Exception ignored) {
+                }
+            }
+
             if (plugin.getConfigManager().autoEquipArmor() && tryEquipArmor(inv, clone)) {
+                remaining[i] = null;
                 continue;
             }
+
             HashMap<Integer, ItemStack> left = inv.addItem(clone);
-            if (!left.isEmpty()) {
+            if (left.isEmpty()) {
+                remaining[i] = null;
+            } else {
                 overflow = true;
-                remaining.addAll(left.values());
+                remaining[i] = left.values().iterator().next();
             }
         }
 
-        grave.setItems(remaining.toArray(new ItemStack[0]));
+        grave.setItems(remaining);
         return overflow;
     }
 
@@ -381,6 +417,7 @@ public class GraveManager {
         placeholders.put("xp", String.valueOf(xp));
         MessageService.send(player, plugin.getConfigManager().prefixed("looted-xp"), placeholders);
         grave.setExperience(0);
+        save();
     }
 
     public boolean canAccess(Player player, Grave grave) {
@@ -458,11 +495,13 @@ public class GraveManager {
             if (!graves.containsKey(tagged)) {
                 entity.remove();
                 markerIndex.remove(entity.getUniqueId());
-            } else if (entity instanceof ArmorStand) {
+            } else if (entity instanceof ArmorStand || entity instanceof Interaction) {
                 markerIndex.put(entity.getUniqueId(), tagged);
-                Grave grave = graves.get(tagged);
-                if (grave != null) {
-                    grave.setMarkerUuid(entity.getUniqueId());
+                if (entity instanceof ArmorStand) {
+                    Grave grave = graves.get(tagged);
+                    if (grave != null) {
+                        grave.setMarkerUuid(entity.getUniqueId());
+                    }
                 }
             }
         }

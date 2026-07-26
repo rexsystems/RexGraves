@@ -18,6 +18,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * One TextDisplay hologram with multiple lines (newline-separated).
+ */
 public class GraveHologram {
 
     private final RexGraves plugin;
@@ -42,44 +45,28 @@ public class GraveHologram {
         }
 
         double offsetY = plugin.getConfigManager().hologramOffsetY();
-        double spacing = plugin.getConfigManager().hologramLineSpacing();
-        Map<String, String> placeholders = plugin.getGraveManager().placeholders(grave, 1);
-        OfflinePlayer owner = Bukkit.getOfflinePlayer(grave.getOwnerId());
+        Location lineLoc = base.clone().add(0, offsetY, 0);
+        Component text = buildText(grave);
 
-        int visibleIndex = 0;
-        int visibleCount = 0;
-        for (String raw : lines) {
-            if (raw != null && !raw.isBlank()) {
-                visibleCount++;
+        TextDisplay display = base.getWorld().spawn(lineLoc, TextDisplay.class, entity -> {
+            entity.text(text);
+            entity.setBillboard(Display.Billboard.CENTER);
+            entity.setShadowed(true);
+            entity.setSeeThrough(true);
+            entity.setDefaultBackground(false);
+            entity.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+            entity.setAlignment(TextDisplay.TextAlignment.CENTER);
+            entity.setLineWidth(200);
+            entity.setPersistent(true);
+            entity.setGravity(false);
+            entity.setInvulnerable(true);
+            GraveKeys.tagHologram(entity.getPersistentDataContainer(), plugin, grave.getId());
+            try {
+                entity.setTeleportDuration(0);
+            } catch (NoSuchMethodError ignored) {
             }
-        }
-
-        for (String raw : lines) {
-            if (raw == null || raw.isBlank()) {
-                continue;
-            }
-            Location lineLoc = base.clone().add(0, offsetY + ((visibleCount - 1 - visibleIndex) * spacing), 0);
-            String rendered = renderLine(raw, placeholders, owner);
-            TextDisplay display = base.getWorld().spawn(lineLoc, TextDisplay.class, entity -> {
-                entity.text(MessageService.parse(rendered));
-                entity.setBillboard(Display.Billboard.CENTER);
-                entity.setShadowed(true);
-                entity.setSeeThrough(true);
-                entity.setDefaultBackground(false);
-                entity.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
-                entity.setAlignment(TextDisplay.TextAlignment.CENTER);
-                entity.setPersistent(true);
-                entity.setGravity(false);
-                entity.setInvulnerable(true);
-                GraveKeys.tagHologram(entity.getPersistentDataContainer(), plugin, grave.getId());
-                try {
-                    entity.setTeleportDuration(0);
-                } catch (NoSuchMethodError ignored) {
-                }
-            });
-            ids.add(display.getUniqueId());
-            visibleIndex++;
-        }
+        });
+        ids.add(display.getUniqueId());
         return ids;
     }
 
@@ -87,24 +74,13 @@ public class GraveHologram {
         if (!plugin.getConfigManager().hologramEnabled()) {
             return;
         }
-        List<String> lines = plugin.getConfigManager().hologramLines();
-        Map<String, String> placeholders = plugin.getGraveManager().placeholders(grave, 1);
-        OfflinePlayer owner = Bukkit.getOfflinePlayer(grave.getOwnerId());
         List<UUID> holograms = grave.getHologramUuids();
-        int index = 0;
-        for (String raw : lines) {
-            if (raw == null || raw.isBlank()) {
-                continue;
-            }
-            if (index >= holograms.size()) {
-                break;
-            }
-            UUID uuid = holograms.get(index++);
-            Entity entity = findEntity(grave, uuid);
-            if (entity instanceof TextDisplay display) {
-                Component text = MessageService.parse(renderLine(raw, placeholders, owner));
-                display.text(text);
-            }
+        if (holograms.isEmpty()) {
+            return;
+        }
+        Entity entity = findEntity(grave, holograms.get(0));
+        if (entity instanceof TextDisplay display) {
+            display.text(buildText(grave));
         }
     }
 
@@ -124,6 +100,26 @@ public class GraveHologram {
             }
         }
         grave.getHologramUuids().clear();
+    }
+
+    private Component buildText(Grave grave) {
+        List<String> lines = plugin.getConfigManager().hologramLines();
+        Map<String, String> placeholders = plugin.getGraveManager().placeholders(grave, 1);
+        OfflinePlayer owner = Bukkit.getOfflinePlayer(grave.getOwnerId());
+
+        Component text = Component.empty();
+        boolean first = true;
+        for (String raw : lines) {
+            if (raw == null || raw.isBlank()) {
+                continue;
+            }
+            if (!first) {
+                text = text.append(Component.newline());
+            }
+            text = text.append(MessageService.parse(renderLine(raw, placeholders, owner)));
+            first = false;
+        }
+        return text;
     }
 
     private String renderLine(String raw, Map<String, String> placeholders, OfflinePlayer owner) {
