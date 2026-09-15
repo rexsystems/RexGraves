@@ -91,6 +91,20 @@ public class GraveListener implements Listener {
         if (graveOpt.isEmpty()) {
             return;
         }
+
+        EntityDamageEvent.DamageCause cause = event.getCause();
+        boolean explosion = cause == EntityDamageEvent.DamageCause.BLOCK_EXPLOSION
+                || cause == EntityDamageEvent.DamageCause.ENTITY_EXPLOSION;
+        if (explosion) {
+            if (plugin.getConfigManager().protectFromExplosions()) {
+                event.setCancelled(true);
+                return;
+            }
+            event.setCancelled(true);
+            plugin.getGraveManager().removeGrave(graveOpt.get(), true, true);
+            return;
+        }
+
         event.setCancelled(true);
 
         if (event instanceof EntityDamageByEntityEvent byEntity) {

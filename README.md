@@ -47,8 +47,18 @@ Modern death graves for Paper, Purpur, and Folia. When you die, your items (and 
 | `/rexgraves admin list <player>` | List a player's graves | `rexgraves.admin` |
 | `/rexgraves admin remove <id>` | Remove a grave by id | `rexgraves.admin` |
 | `/rexgraves admin tp <id>` | Teleport to any grave | `rexgraves.admin` |
+| `/rexgraves admin convert axgraves [path]` | Import AxGraves `data.json` | `rexgraves.admin` |
 
 Aliases: `/rg`, `/grave`, `/graves`
+
+### Migrating from AxGraves
+
+1. Stop the server (or disable AxGraves) so `plugins/AxGraves/data.json` is on disk
+2. Install RexGraves and start
+3. Run `/rexgraves admin convert axgraves`
+4. Or copy `data.json` to `plugins/RexGraves/axgraves-data.json` / `plugins/RexGraves/import/axgraves-data.json` and convert
+
+Worlds referenced by graves must be loaded.
 
 ## Permissions
 

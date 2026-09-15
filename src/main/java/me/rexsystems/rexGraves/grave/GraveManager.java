@@ -152,6 +152,41 @@ public class GraveManager {
         return grave;
     }
 
+    /**
+     * Import an existing grave (e.g. AxGraves conversion). Spawns visuals and persists.
+     */
+    public Grave importGrave(UUID ownerId, String ownerName, Location location, ItemStack[] items, int experience, long createdAt) {
+        Location safe = location == null ? null : LocationUtil.findSafeGraveLocation(location);
+        if (safe == null || safe.getWorld() == null) {
+            throw new IllegalArgumentException("Invalid grave location");
+        }
+
+        long expirationSeconds = plugin.getConfigManager().expirationSeconds();
+        long expiresAt = expirationSeconds <= 0 ? 0L : createdAt + (expirationSeconds * 1000L);
+
+        String id = UUID.randomUUID().toString().substring(0, 8);
+        while (graves.containsKey(id)) {
+            id = UUID.randomUUID().toString().substring(0, 8);
+        }
+
+        String name = ownerName == null || ownerName.isBlank() ? "Unknown" : ownerName;
+        Grave grave = new Grave(
+                id,
+                ownerId,
+                name,
+                safe,
+                items == null ? new ItemStack[0] : items,
+                Math.max(0, experience),
+                createdAt,
+                expiresAt
+        );
+
+        graves.put(id, grave);
+        SchedulerUtils.runAtLocation(plugin, safe, () -> spawnVisuals(grave, true));
+        save();
+        return grave;
+    }
+
     private void enforceMaxGraves(UUID ownerId) {
         int max = plugin.getConfigManager().maxGravesPerPlayer();
         if (max <= 0) {
@@ -531,11 +566,11 @@ public class GraveManager {
         }
         Location origin = player.getLocation();
         return owned.stream()
-                .filter(g -> g.getLocation() != null)
+                .filter(g -> g.getLocation() != null && g.getLocation().getWorld() != null)
                 .min(Comparator.comparingDouble(g -> {
                     Location loc = g.getLocation();
-                    if (!loc.getWorld().equals(origin.getWorld())) {
-                        return Double.MAX_VALUE / 2 + loc.distanceSquared(origin);
+                    if (origin.getWorld() == null || !loc.getWorld().equals(origin.getWorld())) {
+                        return Double.MAX_VALUE;
                     }
                     return loc.distanceSquared(origin);
                 }));

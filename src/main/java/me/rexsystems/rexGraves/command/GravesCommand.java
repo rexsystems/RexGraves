@@ -1,6 +1,7 @@
 package me.rexsystems.rexGraves.command;
 
 import me.rexsystems.rexGraves.RexGraves;
+import me.rexsystems.rexGraves.convert.AxGravesConverter;
 import me.rexsystems.rexGraves.grave.Grave;
 import me.rexsystems.rexGraves.util.MessageService;
 import me.rexsystems.rexGraves.util.SchedulerUtils;
@@ -24,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.io.File;
 
 public class GravesCommand implements CommandExecutor, TabCompleter {
 
@@ -70,6 +72,7 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
             sendHelpLine(sender, "admin list <player>", "List a player's graves");
             sendHelpLine(sender, "admin remove <id>", "Remove a grave");
             sendHelpLine(sender, "admin tp <id>", "Teleport to any grave");
+            sendHelpLine(sender, "admin convert axgraves [path]", "Import AxGraves data.json");
         }
         return true;
     }
@@ -248,6 +251,7 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
             sendHelpLine(sender, "admin list <player>", "List a player's graves");
             sendHelpLine(sender, "admin remove <id>", "Remove a grave");
             sendHelpLine(sender, "admin tp <id>", "Teleport to any grave");
+            sendHelpLine(sender, "admin convert axgraves [path]", "Import AxGraves data.json");
             return true;
         }
 
@@ -256,11 +260,50 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
             case "list" -> adminList(sender, args);
             case "remove" -> adminRemove(sender, args);
             case "tp", "teleport" -> adminTp(sender, args);
+            case "convert", "import" -> adminConvert(sender, args);
             default -> {
                 help(sender);
                 yield true;
             }
         };
+    }
+
+    private boolean adminConvert(CommandSender sender, String[] args) {
+        if (args.length < 3 || !args[2].equalsIgnoreCase("axgraves")) {
+            MessageService.send(sender, plugin.getConfigManager().prefixed("convert-usage"));
+            return true;
+        }
+
+        File file;
+        if (args.length >= 4) {
+            file = new File(args[3]);
+            if (!file.isAbsolute()) {
+                file = new File(plugin.getDataFolder(), args[3]);
+            }
+        } else {
+            file = AxGravesConverter.resolveDefaultFile(plugin);
+        }
+
+        AxGravesConverter.Result result = new AxGravesConverter(plugin).convert(file);
+        Map<String, String> placeholders = new HashMap<>();
+        placeholders.put("path", file.getAbsolutePath());
+        placeholders.put("imported", String.valueOf(result.imported()));
+        placeholders.put("skipped", String.valueOf(result.skipped()));
+        placeholders.put("error", result.error() == null ? "" : result.error());
+
+        if (!file.isFile()) {
+            MessageService.send(sender, plugin.getConfigManager().prefixed("convert-missing"), placeholders);
+            return true;
+        }
+        if (!result.success()) {
+            MessageService.send(sender, plugin.getConfigManager().prefixed("convert-failed"), placeholders);
+            return true;
+        }
+
+        MessageService.send(sender, plugin.getConfigManager().prefixed("convert-done"), placeholders);
+        plugin.getLogger().info("AxGraves convert: imported " + result.imported()
+                + ", skipped " + result.skipped() + " from " + file.getAbsolutePath());
+        return true;
     }
 
     private boolean adminList(CommandSender sender, String[] args) {
@@ -357,11 +400,15 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("admin") && sender.hasPermission("rexgraves.admin")) {
-            return filter(Arrays.asList("list", "remove", "tp"), args[1]);
+            return filter(Arrays.asList("list", "remove", "tp", "convert"), args[1]);
         }
 
         if (args.length == 3 && args[0].equalsIgnoreCase("admin") && args[1].equalsIgnoreCase("list")) {
             return null;
+        }
+
+        if (args.length == 3 && args[0].equalsIgnoreCase("admin") && args[1].equalsIgnoreCase("convert")) {
+            return filter(List.of("axgraves"), args[2]);
         }
 
         if (args.length == 3 && args[0].equalsIgnoreCase("admin")

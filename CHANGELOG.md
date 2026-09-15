@@ -2,6 +2,16 @@
 
 All notable changes to RexGraves are documented in this file.
 
+## [1.0.1] - 2026-09-16
+
+### Added
+- AxGraves converter via `/rexgraves admin convert axgraves [path]`
+
+### Fixed
+- Keep-inventory and disabled-world messages now send on death
+- Nearest-grave lookup no longer crashes across worlds
+- `protect-from-explosions` is respected (destroy + drop when disabled)
+
 ## [1.0.0] - 2026-07-25
 
 ### Added

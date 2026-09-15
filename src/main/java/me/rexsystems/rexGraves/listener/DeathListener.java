@@ -33,11 +33,13 @@ public class DeathListener implements Listener {
         if (player.getWorld() != null) {
             Boolean keepInventory = player.getWorld().getGameRuleValue(GameRule.KEEP_INVENTORY);
             if (Boolean.TRUE.equals(keepInventory) || event.getKeepInventory()) {
+                MessageService.send(player, plugin.getConfigManager().prefixed("keep-inventory"));
                 return;
             }
         }
 
         if (!plugin.getConfigManager().isWorldAllowed(player.getWorld().getName())) {
+            MessageService.send(player, plugin.getConfigManager().prefixed("disabled-world"));
             return;
         }
 
