@@ -15,6 +15,7 @@ import org.bukkit.inventory.ItemStack;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -136,8 +137,24 @@ public final class AxGravesConverter {
         if (encoded == null || encoded.isBlank()) {
             return new ItemStack[0];
         }
-        byte[] payload = Base64.getDecoder().decode(encoded);
-        return AxItemArrayCodec.decode(payload);
+        // Gson may leave unicode escapes already decoded; strip whitespace/newlines just in case.
+        String cleaned = encoded.replace("\\u003d", "=").replace("\\u003D", "=").trim();
+        byte[] payload = Base64.getDecoder().decode(cleaned);
+        ItemStack[] items = AxItemArrayCodec.decode(payload);
+        int expected = AxItemArrayCodec.countNonEmptySlots(payload);
+        int got = 0;
+        for (ItemStack item : items) {
+            if (item != null && !item.getType().isAir()) {
+                got++;
+            }
+        }
+        if (expected > 0 && got == 0) {
+            throw new IllegalStateException("Decoded 0/" + expected + " items from AxGraves payload");
+        }
+        if (expected > got) {
+            plugin.getLogger().warning("AxGraves convert: only restored " + got + "/" + expected + " item stacks");
+        }
+        return items;
     }
 
     private static boolean isEmpty(ItemStack[] items) {
@@ -184,27 +201,72 @@ public final class AxGravesConverter {
     }
 
     /**
-     * Decodes AxAPI ItemArraySerializer bytes using Paper UnsafeValues item codec
-     * (compressed NBT with DataVersion), matching WrappedItemStack.serialize().
+     * Decodes AxAPI ItemArraySerializer bytes (int count, then short-len + item bytes).
+     * Item bytes are Ax/Paper compressed NBT with DataVersion.
      */
     static final class AxItemArrayCodec {
+        private static final Method DESERIALIZE_BYTES;
+        private static final Method UNSAFE_DESERIALIZE_ITEM;
+
+        static {
+            Method deserializeBytes = null;
+            Method unsafeDeserialize = null;
+            try {
+                deserializeBytes = ItemStack.class.getMethod("deserializeBytes", byte[].class);
+            } catch (NoSuchMethodException ignored) {
+            }
+            try {
+                unsafeDeserialize = Class.forName("org.bukkit.UnsafeValues")
+                        .getMethod("deserializeItem", byte[].class);
+            } catch (ClassNotFoundException | NoSuchMethodException ignored) {
+            }
+            DESERIALIZE_BYTES = deserializeBytes;
+            UNSAFE_DESERIALIZE_ITEM = unsafeDeserialize;
+        }
+
         private AxItemArrayCodec() {
+        }
+
+        static int countNonEmptySlots(byte[] value) {
+            try {
+                java.io.DataInputStream input = new java.io.DataInputStream(new java.io.ByteArrayInputStream(value));
+                int length = input.readInt();
+                int counted = 0;
+                for (int i = 0; i < length; i++) {
+                    int size = input.readUnsignedShort();
+                    if (size > 0) {
+                        counted++;
+                        input.skipBytes(size);
+                    }
+                }
+                return counted;
+            } catch (IOException e) {
+                return -1;
+            }
         }
 
         static ItemStack[] decode(byte[] value) {
             java.io.DataInputStream input = new java.io.DataInputStream(new java.io.ByteArrayInputStream(value));
             try {
                 int length = input.readInt();
+                if (length < 0 || length > 10_000) {
+                    throw new IllegalStateException("Invalid AxGraves item count: " + length);
+                }
                 ItemStack[] items = new ItemStack[length];
                 for (int i = 0; i < length; i++) {
-                    short size = input.readShort();
-                    if (size <= 0) {
+                    int size = input.readUnsignedShort();
+                    if (size == 0) {
                         items[i] = null;
                         continue;
                     }
                     byte[] read = new byte[size];
                     input.readFully(read);
-                    items[i] = deserializeItem(read);
+                    try {
+                        items[i] = deserializeItem(read);
+                    } catch (Throwable t) {
+                        // Soft-skip broken items instead of nuking the whole grave
+                        items[i] = null;
+                    }
                 }
                 return items;
             } catch (IOException e) {
@@ -212,17 +274,44 @@ public final class AxGravesConverter {
             }
         }
 
-        @SuppressWarnings("deprecation")
         private static ItemStack deserializeItem(byte[] bytes) {
-            try {
-                ItemStack stack = Bukkit.getUnsafe().deserializeItem(bytes);
-                if (stack == null || stack.getType() == Material.AIR) {
-                    return null;
+            Throwable last = null;
+
+            if (DESERIALIZE_BYTES != null) {
+                try {
+                    ItemStack stack = (ItemStack) DESERIALIZE_BYTES.invoke(null, (Object) bytes);
+                    if (stack == null || stack.getType() == Material.AIR || stack.getType().isAir()) {
+                        return null;
+                    }
+                    return stack;
+                } catch (Throwable t) {
+                    last = unwrap(t);
                 }
-                return stack;
-            } catch (Throwable t) {
-                throw new IllegalStateException("Failed to deserialize AxGraves item", t);
             }
+
+            if (UNSAFE_DESERIALIZE_ITEM != null) {
+                try {
+                    ItemStack stack = (ItemStack) UNSAFE_DESERIALIZE_ITEM.invoke(Bukkit.getUnsafe(), (Object) bytes);
+                    if (stack == null || stack.getType() == Material.AIR || stack.getType().isAir()) {
+                        return null;
+                    }
+                    return stack;
+                } catch (Throwable t) {
+                    last = unwrap(t);
+                }
+            }
+
+            if (last != null) {
+                throw new IllegalStateException("Failed to deserialize AxGraves item", last);
+            }
+            throw new IllegalStateException("No compatible Paper item deserialize API on this server");
+        }
+
+        private static Throwable unwrap(Throwable t) {
+            if (t instanceof java.lang.reflect.InvocationTargetException ite && ite.getCause() != null) {
+                return ite.getCause();
+            }
+            return t;
         }
     }
 }

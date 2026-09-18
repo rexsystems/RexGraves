@@ -50,6 +50,18 @@ public final class SchedulerUtils {
         Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, scheduledTask -> task.run(), initial, period);
     }
 
+    public static void runAsyncAtFixedRate(Plugin plugin, Runnable task, long initialDelaySeconds, long periodSeconds) {
+        long initial = Math.max(1L, initialDelaySeconds);
+        long period = Math.max(1L, periodSeconds);
+        Bukkit.getAsyncScheduler().runAtFixedRate(
+                plugin,
+                scheduledTask -> task.run(),
+                initial,
+                period,
+                java.util.concurrent.TimeUnit.SECONDS
+        );
+    }
+
     public static void runForPlayer(Plugin plugin, Player player, Runnable task) {
         if (player == null) {
             return;

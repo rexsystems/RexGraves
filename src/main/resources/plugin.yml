@@ -11,7 +11,7 @@ softdepend: [PlaceholderAPI]
 commands:
   rexgraves:
     description: Main RexGraves command
-    aliases: [rg, graves, grave]
+    aliases: [rxg, graves, grave]
     usage: /rexgraves <help|list|locate|tp|compass|reload|admin>
 
 permissions:

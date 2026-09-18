@@ -1,11 +1,14 @@
 package me.rexsystems.rexGraves.config;
 
 import me.rexsystems.rexGraves.RexGraves;
+import me.rexsystems.rexGraves.storage.GraveRepositoryFactory;
 import org.bukkit.configuration.file.FileConfiguration;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 public class ConfigManager {
 
@@ -95,6 +98,68 @@ public class ConfigManager {
 
     public String lootSound() {
         return config.getString("settings.loot-sound", "BLOCK_CHEST_OPEN");
+    }
+
+    public String storageType() {
+        return GraveRepositoryFactory.normalizeType(config.getString("storage.type", "yaml"));
+    }
+
+    public long autosaveSeconds() {
+        return Math.max(0L, config.getLong("storage.autosave-seconds", 30L));
+    }
+
+    public String sqliteFile() {
+        return config.getString("storage.sqlite.file", "graves.db");
+    }
+
+    public String mysqlHost() {
+        return config.getString("storage.mysql.host", "127.0.0.1");
+    }
+
+    public int mysqlPort() {
+        return Math.max(1, config.getInt("storage.mysql.port", 3306));
+    }
+
+    public String mysqlDatabase() {
+        return config.getString("storage.mysql.database", "rexgraves");
+    }
+
+    public String mysqlUsername() {
+        return config.getString("storage.mysql.username", "root");
+    }
+
+    public String mysqlPassword() {
+        return config.getString("storage.mysql.password", "");
+    }
+
+    public int mysqlPoolSize() {
+        return Math.max(1, config.getInt("storage.mysql.pool-size", 5));
+    }
+
+    public boolean mysqlUseSsl() {
+        return config.getBoolean("storage.mysql.use-ssl", false);
+    }
+
+    public Set<String> blacklistedDeathCauses() {
+        List<String> raw = config.getStringList("blacklisted-death-causes");
+        if (raw == null || raw.isEmpty()) {
+            return Collections.emptySet();
+        }
+        Set<String> causes = new HashSet<>();
+        for (String entry : raw) {
+            if (entry == null || entry.isBlank()) {
+                continue;
+            }
+            causes.add(entry.trim().toUpperCase(Locale.ROOT));
+        }
+        return causes;
+    }
+
+    public boolean isDeathCauseBlacklisted(String causeName) {
+        if (causeName == null || causeName.isBlank()) {
+            return false;
+        }
+        return blacklistedDeathCauses().contains(causeName.toUpperCase(Locale.ROOT));
     }
 
     public List<String> disabledWorlds() {

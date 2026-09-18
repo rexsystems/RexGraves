@@ -42,6 +42,13 @@ public final class RexGraves extends JavaPlugin {
             // Tick graves every second (hologram timers)
             SchedulerUtils.runAtFixedRate(this, () -> graveManager.tick(), 20L, 20L);
 
+            long autosaveSeconds = configManager.autosaveSeconds();
+            if (autosaveSeconds > 0L) {
+                long periodTicks = Math.max(20L, autosaveSeconds * 20L);
+                SchedulerUtils.runAtFixedRate(this, () -> graveManager.saveNow(), periodTicks, periodTicks);
+                getLogger().info("Grave autosave every " + autosaveSeconds + "s.");
+            }
+
             new Metrics(this, BSTATS_PLUGIN_ID);
 
             if (getServer().getPluginManager().getPlugin("PlaceholderAPI") != null) {

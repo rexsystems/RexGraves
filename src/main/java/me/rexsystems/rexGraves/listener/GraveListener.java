@@ -4,6 +4,7 @@ import me.rexsystems.rexGraves.RexGraves;
 import me.rexsystems.rexGraves.grave.Grave;
 import me.rexsystems.rexGraves.gui.GraveGui;
 import me.rexsystems.rexGraves.util.GraveKeys;
+import me.rexsystems.rexGraves.util.MessageService;
 import org.bukkit.entity.ArmorStand;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Interaction;
@@ -21,11 +22,19 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 public class GraveListener implements Listener {
 
     private final RexGraves plugin;
+
+    /** Tracks pending break confirmations: player UUID -> PendingBreak */
+    private final Map<UUID, PendingBreak> pendingBreaks = new HashMap<>();
+
+    private static final long CONFIRM_TIMEOUT_MS = 5000L;
 
     public GraveListener(RexGraves plugin) {
         this.plugin = plugin;
@@ -110,9 +119,34 @@ public class GraveListener implements Listener {
         if (event instanceof EntityDamageByEntityEvent byEntity) {
             Player breaker = resolvePlayer(byEntity.getDamager());
             if (breaker != null && breaker.hasPermission("rexgraves.break")) {
-                boolean drop = breaker.isSneaking();
-                plugin.getGraveManager().removeGrave(graveOpt.get(), true, drop);
+                handleBreakAttempt(breaker, graveOpt.get());
             }
+        }
+    }
+
+    private void handleBreakAttempt(Player breaker, Grave grave) {
+        boolean drop = breaker.isSneaking();
+        long now = System.currentTimeMillis();
+        UUID playerId = breaker.getUniqueId();
+
+        PendingBreak pending = pendingBreaks.get(playerId);
+        if (pending != null && pending.graveId.equals(grave.getId())
+                && pending.drop == drop
+                && (now - pending.timestamp) < CONFIRM_TIMEOUT_MS) {
+            // Confirmed! Execute the break
+            pendingBreaks.remove(playerId);
+            plugin.getGraveManager().removeGrave(grave, true, drop);
+            return;
+        }
+
+        // First hit — ask for confirmation
+        pendingBreaks.put(playerId, new PendingBreak(grave.getId(), drop, now));
+
+        Map<String, String> placeholders = plugin.getGraveManager().placeholders(grave, 1);
+        if (drop) {
+            MessageService.send(breaker, plugin.getConfigManager().prefixed("break-confirm-drop"), placeholders);
+        } else {
+            MessageService.send(breaker, plugin.getConfigManager().prefixed("break-confirm-destroy"), placeholders);
         }
     }
 
@@ -140,5 +174,8 @@ public class GraveListener implements Listener {
     @EventHandler
     public void onChunkLoad(ChunkLoadEvent event) {
         plugin.getGraveManager().handleChunkLoad(event.getChunk());
+    }
+
+    private record PendingBreak(String graveId, boolean drop, long timestamp) {
     }
 }

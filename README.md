@@ -19,8 +19,21 @@ Modern death graves for Paper, Purpur, and Folia. When you die, your items (and 
 - Max graves per player, world blacklist/whitelist
 - Owner-only access with admin bypass
 - Persistent across restarts and chunk loads
+- YAML, SQLite, or MySQL storage with periodic autosave
 - Folia-compatible
 - PlaceholderAPI soft-depend for hologram text
+
+## Storage
+
+Set `storage.type` in `config.yml`:
+
+| Type | Notes |
+|------|-------|
+| `yaml` | Default. Writes `plugins/RexGraves/graves.yml` atomically |
+| `sqlite` | Local `plugins/RexGraves/graves.db` (imports existing YAML once if DB is empty) |
+| `mysql` | Configure host/database/credentials under `storage.mysql` |
+
+`storage.autosave-seconds` (default `30`) runs a backup save in addition to saves after create/loot/remove. Set to `0` to disable the timer.
 
 ## Requirements
 
@@ -44,12 +57,12 @@ Modern death graves for Paper, Purpur, and Folia. When you die, your items (and 
 | `/rexgraves tp [index]` | Teleport to a grave | `rexgraves.teleport` |
 | `/rexgraves compass [index]` | Point compass to a grave | `rexgraves.compass` |
 | `/rexgraves reload` | Reload config | `rexgraves.reload` |
-| `/rexgraves admin list <player>` | List a player's graves | `rexgraves.admin` |
+| `/rexgraves admin list [player] [page]` | List all graves or a player's | `rexgraves.admin` |
 | `/rexgraves admin remove <id>` | Remove a grave by id | `rexgraves.admin` |
 | `/rexgraves admin tp <id>` | Teleport to any grave | `rexgraves.admin` |
 | `/rexgraves admin convert axgraves [path]` | Import AxGraves `data.json` | `rexgraves.admin` |
 
-Aliases: `/rg`, `/grave`, `/graves`
+Aliases: `/rxg`, `/grave`, `/graves`
 
 ### Migrating from AxGraves
 

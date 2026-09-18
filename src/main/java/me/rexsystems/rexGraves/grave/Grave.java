@@ -27,6 +27,7 @@ public class Grave {
     private final long createdAt;
     private final long expiresAt;
     private UUID markerUuid;
+    private UUID clickBoxUuid;
     private final List<UUID> hologramUuids = new ArrayList<>();
 
     public Grave(
@@ -81,6 +82,15 @@ public class Grave {
         this.pitch = location.getPitch();
     }
 
+    public void setLocationCoords(String worldName, double x, double y, double z, float yaw, float pitch) {
+        this.worldName = worldName;
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.yaw = yaw;
+        this.pitch = pitch;
+    }
+
     public String getWorldName() {
         return worldName;
     }
@@ -95,6 +105,14 @@ public class Grave {
 
     public double getZ() {
         return z;
+    }
+
+    public float getYaw() {
+        return yaw;
+    }
+
+    public float getPitch() {
+        return pitch;
     }
 
     public ItemStack[] getItems() {
@@ -166,6 +184,14 @@ public class Grave {
         this.markerUuid = markerUuid;
     }
 
+    public UUID getClickBoxUuid() {
+        return clickBoxUuid;
+    }
+
+    public void setClickBoxUuid(UUID clickBoxUuid) {
+        this.clickBoxUuid = clickBoxUuid;
+    }
+
     public List<UUID> getHologramUuids() {
         return hologramUuids;
     }
@@ -192,6 +218,7 @@ public class Grave {
         section.set("expires-at", expiresAt);
         section.set("items", ItemSerializer.serialize(items));
         section.set("marker-uuid", markerUuid == null ? null : markerUuid.toString());
+        section.set("clickbox-uuid", clickBoxUuid == null ? null : clickBoxUuid.toString());
         List<String> holograms = new ArrayList<>();
         for (UUID uuid : hologramUuids) {
             holograms.add(uuid.toString());
@@ -233,6 +260,13 @@ public class Grave {
         String marker = section.getString("marker-uuid");
         if (marker != null && !marker.isBlank()) {
             grave.setMarkerUuid(UUID.fromString(marker));
+        }
+        String clickBox = section.getString("clickbox-uuid");
+        if (clickBox != null && !clickBox.isBlank()) {
+            try {
+                grave.setClickBoxUuid(UUID.fromString(clickBox));
+            } catch (IllegalArgumentException ignored) {
+            }
         }
         List<String> holograms = section.getStringList("hologram-uuids");
         List<UUID> hologramUuids = new ArrayList<>();

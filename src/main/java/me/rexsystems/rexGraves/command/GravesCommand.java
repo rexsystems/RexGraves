@@ -69,7 +69,7 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
             sendHelpLine(sender, "reload", "Reload configuration");
         }
         if (sender.hasPermission("rexgraves.admin")) {
-            sendHelpLine(sender, "admin list <player>", "List a player's graves");
+            sendHelpLine(sender, "admin list [player] [page]", "List all graves or a player's");
             sendHelpLine(sender, "admin remove <id>", "Remove a grave");
             sendHelpLine(sender, "admin tp <id>", "Teleport to any grave");
             sendHelpLine(sender, "admin convert axgraves [path]", "Import AxGraves data.json");
@@ -248,7 +248,7 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
             return true;
         }
         if (args.length < 2) {
-            sendHelpLine(sender, "admin list <player>", "List a player's graves");
+            sendHelpLine(sender, "admin list [player] [page]", "List all graves or a player's");
             sendHelpLine(sender, "admin remove <id>", "Remove a grave");
             sendHelpLine(sender, "admin tp <id>", "Teleport to any grave");
             sendHelpLine(sender, "admin convert axgraves [path]", "Import AxGraves data.json");
@@ -306,32 +306,149 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
+    private static final int ADMIN_LIST_PAGE_SIZE = 8;
+
     private boolean adminList(CommandSender sender, String[] args) {
-        if (args.length < 3) {
-            sender.sendMessage("Usage: /rexgraves admin list <player>");
-            return true;
+        // /admin list
+        // /admin list <page>
+        // /admin list <player> [page]
+        OfflinePlayer target = null;
+        int page = 1;
+
+        if (args.length >= 3) {
+            if (isPositiveInt(args[2])) {
+                page = Integer.parseInt(args[2]);
+            } else {
+                target = resolveKnownPlayer(args[2]);
+                if (target == null) {
+                    Map<String, String> missing = new HashMap<>();
+                    missing.put("player", args[2]);
+                    MessageService.send(sender, plugin.getConfigManager().prefixed("admin-player-not-found"), missing);
+                    return true;
+                }
+                if (args.length >= 4) {
+                    if (!isPositiveInt(args[3])) {
+                        MessageService.send(sender, plugin.getConfigManager().prefixed("admin-list-usage"));
+                        return true;
+                    }
+                    page = Integer.parseInt(args[3]);
+                }
+            }
         }
-        OfflinePlayer target = Bukkit.getOfflinePlayer(args[2]);
-        UUID uuid = target.getUniqueId();
-        List<Grave> graves = plugin.getGraveManager().getByOwner(uuid);
-        Map<String, String> header = new HashMap<>();
-        header.put("player", target.getName() == null ? args[2] : target.getName());
-        header.put("count", String.valueOf(graves.size()));
-        MessageService.send(sender, plugin.getConfigManager().prefixed("admin-list-header"), header);
+
+        List<Grave> graves = target == null
+                ? plugin.getGraveManager().getAllSorted()
+                : plugin.getGraveManager().getByOwner(target.getUniqueId());
 
         if (graves.isEmpty()) {
-            MessageService.send(sender, plugin.getConfigManager().prefixed("none"));
+            if (target != null) {
+                Map<String, String> none = new HashMap<>();
+                none.put("player", displayName(target, args.length >= 3 ? args[2] : "?"));
+                MessageService.send(sender, plugin.getConfigManager().prefixed("admin-none"), none);
+            } else {
+                MessageService.send(sender, plugin.getConfigManager().prefixed("admin-none-all"));
+            }
             return true;
         }
 
-        int index = 1;
-        for (Grave grave : graves) {
-            Map<String, String> placeholders = plugin.getGraveManager().placeholders(grave, index++);
+        int totalPages = Math.max(1, (int) Math.ceil(graves.size() / (double) ADMIN_LIST_PAGE_SIZE));
+        if (page > totalPages) {
+            page = totalPages;
+        }
+
+        int from = (page - 1) * ADMIN_LIST_PAGE_SIZE;
+        int to = Math.min(from + ADMIN_LIST_PAGE_SIZE, graves.size());
+
+        Map<String, String> header = new HashMap<>();
+        header.put("count", String.valueOf(graves.size()));
+        header.put("page", String.valueOf(page));
+        header.put("pages", String.valueOf(totalPages));
+        if (target == null) {
+            MessageService.send(sender, plugin.getConfigManager().prefixed("admin-list-all-header"), header);
+        } else {
+            header.put("player", displayName(target, args[2]));
+            MessageService.send(sender, plugin.getConfigManager().prefixed("admin-list-header"), header);
+        }
+
+        for (int i = from; i < to; i++) {
+            Grave grave = graves.get(i);
+            int index = i + 1;
+            Map<String, String> placeholders = plugin.getGraveManager().placeholders(grave, index);
             placeholders.put("id", grave.getId());
-            MessageService.send(sender, plugin.getConfigManager().prefixed("list-entry")
-                    + " <dark_gray>(</dark_gray><white>" + grave.getId() + "</white><dark_gray>)</dark_gray>", placeholders);
+            String entryKey = target == null ? "admin-list-all-entry" : "admin-list-entry";
+            MessageService.send(sender, plugin.getConfigManager().prefixed(entryKey), placeholders);
+        }
+
+        if (totalPages > 1) {
+            Map<String, String> footer = new HashMap<>();
+            footer.put("page", String.valueOf(page));
+            footer.put("pages", String.valueOf(totalPages));
+            if (target == null) {
+                footer.put("next", page < totalPages
+                        ? "/rexgraves admin list " + (page + 1)
+                        : "/rexgraves admin list " + page);
+            } else {
+                String name = displayName(target, args[2]);
+                footer.put("next", page < totalPages
+                        ? "/rexgraves admin list " + name + " " + (page + 1)
+                        : "/rexgraves admin list " + name + " " + page);
+            }
+            MessageService.send(sender, plugin.getConfigManager().prefixed("admin-list-page"), footer);
         }
         return true;
+    }
+
+    private static boolean isPositiveInt(String raw) {
+        try {
+            return Integer.parseInt(raw) > 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private static String displayName(OfflinePlayer player, String fallback) {
+        if (player.getName() != null && !player.getName().isBlank()) {
+            return player.getName();
+        }
+        return fallback == null || fallback.isBlank() ? "Unknown" : fallback;
+    }
+
+    /**
+     * Resolve a real known player: online, grave owner match, or hasPlayedBefore.
+     * Avoids inventing offline UUIDs for random names.
+     */
+    private OfflinePlayer resolveKnownPlayer(String name) {
+        if (name == null || name.isBlank()) {
+            return null;
+        }
+
+        Player online = Bukkit.getPlayerExact(name);
+        if (online != null) {
+            return online;
+        }
+
+        for (Grave grave : plugin.getGraveManager().getAll()) {
+            if (grave.getOwnerName() != null && grave.getOwnerName().equalsIgnoreCase(name)) {
+                return Bukkit.getOfflinePlayer(grave.getOwnerId());
+            }
+        }
+
+        try {
+            UUID uuid = UUID.fromString(name);
+            OfflinePlayer byId = Bukkit.getOfflinePlayer(uuid);
+            if (byId.isOnline() || byId.hasPlayedBefore() || !plugin.getGraveManager().getByOwner(uuid).isEmpty()) {
+                return byId;
+            }
+        } catch (IllegalArgumentException ignored) {
+        }
+
+        for (OfflinePlayer offline : Bukkit.getOfflinePlayers()) {
+            if (offline.getName() != null && offline.getName().equalsIgnoreCase(name)
+                    && (offline.hasPlayedBefore() || offline.isOnline())) {
+                return offline;
+            }
+        }
+        return null;
     }
 
     private boolean adminRemove(CommandSender sender, String[] args) {
@@ -404,7 +521,21 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
         }
 
         if (args.length == 3 && args[0].equalsIgnoreCase("admin") && args[1].equalsIgnoreCase("list")) {
-            return null;
+            List<String> suggestions = new ArrayList<>();
+            suggestions.add("1");
+            for (Player online : Bukkit.getOnlinePlayers()) {
+                suggestions.add(online.getName());
+            }
+            for (Grave grave : plugin.getGraveManager().getAll()) {
+                if (grave.getOwnerName() != null && !suggestions.contains(grave.getOwnerName())) {
+                    suggestions.add(grave.getOwnerName());
+                }
+            }
+            return filter(suggestions, args[2]);
+        }
+
+        if (args.length == 4 && args[0].equalsIgnoreCase("admin") && args[1].equalsIgnoreCase("list")) {
+            return filter(List.of("1", "2", "3"), args[3]);
         }
 
         if (args.length == 3 && args[0].equalsIgnoreCase("admin") && args[1].equalsIgnoreCase("convert")) {

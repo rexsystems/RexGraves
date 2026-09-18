@@ -12,6 +12,7 @@ public final class LocationUtil {
 
     /**
      * Find a safe grave location near the death point (void / lava / fire friendly).
+     * Void deaths stay on the same X/Z and use the first standable Y above world min height.
      */
     public static Location findSafeGraveLocation(Location origin) {
         if (origin == null || origin.getWorld() == null) {
@@ -20,6 +21,13 @@ public final class LocationUtil {
 
         World world = origin.getWorld();
         Location base = origin.clone();
+
+        if (isVoidDeath(base)) {
+            Location voidSafe = findAboveVoid(base);
+            if (voidSafe != null) {
+                return center(voidSafe);
+            }
+        }
 
         int minY = world.getMinHeight() + 1;
         int maxY = world.getMaxHeight() - 2;
@@ -67,6 +75,52 @@ public final class LocationUtil {
         int highest = world.getHighestBlockYAt(base);
         Location fallback = new Location(world, base.getX(), Math.max(highest + 1, minY), base.getZ());
         return center(fallback);
+    }
+
+    private static boolean isVoidDeath(Location location) {
+        World world = location.getWorld();
+        if (world == null) {
+            return false;
+        }
+        int minHeight = world.getMinHeight();
+        if (location.getBlockY() < minHeight) {
+            return true;
+        }
+        int x = location.getBlockX();
+        int z = location.getBlockZ();
+        for (int y = location.getBlockY(); y >= minHeight; y--) {
+            Block block = world.getBlockAt(x, y, z);
+            if (block.getType().isSolid() || block.isLiquid()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Same X/Z as death, first standable spot scanning up from just above void.
+     */
+    private static Location findAboveVoid(Location origin) {
+        World world = origin.getWorld();
+        if (world == null) {
+            return null;
+        }
+        int minY = world.getMinHeight() + 1;
+        int maxY = world.getMaxHeight() - 2;
+        double x = origin.getX();
+        double z = origin.getZ();
+        float yaw = origin.getYaw();
+        float pitch = origin.getPitch();
+
+        for (int y = minY; y <= maxY; y++) {
+            Location candidate = new Location(world, x, y, z, yaw, pitch);
+            if (isSafe(candidate)) {
+                return candidate;
+            }
+        }
+
+        // No solid footing in the column: place at the void edge so it stays reachable.
+        return new Location(world, x, minY, z, yaw, pitch);
     }
 
     private static boolean isSafe(Location location) {

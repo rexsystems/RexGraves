@@ -23,7 +23,7 @@ import java.util.List;
  */
 public class ConfigAutoUpdater {
 
-    public static final int CURRENT_CONFIG_VERSION = 1;
+    public static final int CURRENT_CONFIG_VERSION = 3;
 
     private final RexGraves plugin;
 

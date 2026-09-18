@@ -2,7 +2,7 @@
 # Messages use MiniMessage. Legacy & codes and &#RRGGBB / #RRGGBB also work.
 
 # Internal. Do not change unless you know what you are doing.
-config-version: 1
+config-version: 3
 
 settings:
   # Create a grave when a player dies
@@ -38,6 +38,23 @@ settings:
   # Sound when a grave is looted
   loot-sound: BLOCK_CHEST_OPEN
 
+# Grave persistence
+# type: yaml | sqlite | mysql
+storage:
+  type: yaml
+  # Periodic backup save in seconds. 0 = disable (event saves still run)
+  autosave-seconds: 30
+  sqlite:
+    file: graves.db
+  mysql:
+    host: 127.0.0.1
+    port: 3306
+    database: rexgraves
+    username: root
+    password: ""
+    pool-size: 5
+    use-ssl: false
+
 # Worlds where graves are never created
 disabled-worlds:
   - world_nether_example
@@ -45,6 +62,11 @@ disabled-worlds:
 # Worlds listed here use a whitelist instead of the blacklist above
 # Leave empty to use disabled-worlds only
 enabled-worlds: []
+
+# Damage causes that skip grave creation (vanilla drops keep working)
+# Empty = create graves for every death cause
+# Values: https://hub.spigotmc.org/javadocs/bukkit/org/bukkit/event/entity/EntityDamageEvent.DamageCause.html
+blacklisted-death-causes: []
 
 hologram:
   enabled: true
@@ -85,7 +107,15 @@ messages:
   compass: "<prefix><gray>Compass now points to grave #{index}.</gray>"
   expired: "<prefix><yellow>One of your graves expired.</yellow>"
   removed: "<prefix><gray>Grave removed.</gray>"
-  admin-list-header: "<prefix><gray>Graves for <white>{player}</white> <dark_gray>(</dark_gray><white>{count}</white><dark_gray>)</dark_gray>:</gray>"
+  admin-list-header: "<prefix><gray>Graves for <white>{player}</white> <dark_gray>(</dark_gray><white>{count}</white><dark_gray>)</dark_gray> <dark_gray>·</dark_gray> page <white>{page}</white>/<white>{pages}</white>:</gray>"
+  admin-list-all-header: "<prefix><gray>All graves <dark_gray>(</dark_gray><white>{count}</white><dark_gray>)</dark_gray> <dark_gray>·</dark_gray> page <white>{page}</white>/<white>{pages}</white>:</gray>"
+  admin-list-entry: "<dark_gray>-</dark_gray> <white>#{index}</white> <gray>{world}</gray> <dark_gray>@</dark_gray> <white>{x}</white>, <white>{y}</white>, <white>{z}</white> <dark_gray>·</dark_gray> <gray>{time_left}</gray> <dark_gray>(</dark_gray><white>{id}</white><dark_gray>)</dark_gray>"
+  admin-list-all-entry: "<dark_gray>-</dark_gray> <white>#{index}</white> <aqua>{owner}</aqua> <gray>{world}</gray> <dark_gray>@</dark_gray> <white>{x}</white>, <white>{y}</white>, <white>{z}</white> <dark_gray>·</dark_gray> <gray>{time_left}</gray> <dark_gray>(</dark_gray><white>{id}</white><dark_gray>)</dark_gray>"
+  admin-list-page: "<prefix><dark_gray>Page <white>{page}</white>/<white>{pages}</white></dark_gray> <gray>· next:</gray> <white>{next}</white>"
+  admin-list-usage: "<prefix><gray>Usage: /rexgraves admin list [player] [page]</gray>"
+  admin-none: "<prefix><gray><white>{player}</white> has no active graves.</gray>"
+  admin-none-all: "<prefix><gray>No graves on the server.</gray>"
+  admin-player-not-found: "<prefix><red>Player not found:</red> <white>{player}</white>"
   admin-removed: "<prefix><green>Removed grave <white>{id}</white>.</green>"
   disabled-world: "<prefix><red>Graves are disabled in this world.</red>"
   keep-inventory: "<prefix><gray>Keep inventory is on - no grave was created.</gray>"
@@ -96,6 +126,8 @@ messages:
   convert-done: "<prefix><green>Imported <white>{imported}</white> grave(s)</green><gray> · skipped <white>{skipped}</white> · from <white>{path}</white></gray>"
   help-header: "<prefix><gray>Commands:</gray>"
   help-line: "<dark_gray>•</dark_gray> <white>/rexgraves {command}</white> <dark_gray>-</dark_gray> <gray>{description}</gray>"
+  break-confirm-drop: "<prefix><yellow>Hit again to <white>drop items</white> from <white>{owner}</white>'s grave.</yellow>"
+  break-confirm-destroy: "<prefix><red>Hit again to <white>destroy</white> <white>{owner}</white>'s grave. <bold>Items will be lost!</bold></red>"
   time-never: "Never expires"
   time-expired: "Expired"
   time-format: "{hours}h {minutes}m {seconds}s"

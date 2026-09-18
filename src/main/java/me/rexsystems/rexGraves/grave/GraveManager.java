@@ -2,6 +2,8 @@ package me.rexsystems.rexGraves.grave;
 
 import me.rexsystems.rexGraves.RexGraves;
 import me.rexsystems.rexGraves.gui.GraveGui;
+import me.rexsystems.rexGraves.storage.GraveRepository;
+import me.rexsystems.rexGraves.storage.GraveRepositoryFactory;
 import me.rexsystems.rexGraves.util.GraveKeys;
 import me.rexsystems.rexGraves.util.LocationUtil;
 import me.rexsystems.rexGraves.util.MessageService;
@@ -35,25 +37,28 @@ import java.util.concurrent.ConcurrentHashMap;
 public class GraveManager {
 
     private final RexGraves plugin;
-    private final GraveStorage storage;
+    private final GraveRepository storage;
     private final GraveHologram hologram;
     private final Map<String, Grave> graves = new ConcurrentHashMap<>();
     private final Map<UUID, String> markerIndex = new ConcurrentHashMap<>();
+    private final java.util.Set<String> lockedGraves = ConcurrentHashMap.newKeySet();
 
     public GraveManager(RexGraves plugin) {
         this.plugin = plugin;
-        this.storage = new GraveStorage(plugin);
+        this.storage = GraveRepositoryFactory.create(plugin);
         this.hologram = new GraveHologram(plugin);
     }
 
     public void load() {
-        storage.load();
         graves.clear();
         markerIndex.clear();
-        for (Grave grave : storage.readAll()) {
+        for (Grave grave : storage.loadAll()) {
             graves.put(grave.getId(), grave);
             if (grave.getMarkerUuid() != null) {
                 markerIndex.put(grave.getMarkerUuid(), grave.getId());
+            }
+            if (grave.getClickBoxUuid() != null) {
+                markerIndex.put(grave.getClickBoxUuid(), grave.getId());
             }
         }
         plugin.getLogger().info("Loaded " + graves.size() + " graves.");
@@ -71,6 +76,10 @@ public class GraveManager {
     }
 
     public void save() {
+        storage.saveAll(graves.values());
+    }
+
+    public void saveNow() {
         storage.saveAll(graves.values());
     }
 
@@ -115,6 +124,14 @@ public class GraveManager {
         return list;
     }
 
+    public List<Grave> getAllSorted() {
+        List<Grave> list = new ArrayList<>(graves.values());
+        list.sort(Comparator
+                .comparing(Grave::getOwnerName, String.CASE_INSENSITIVE_ORDER)
+                .thenComparingLong(Grave::getCreatedAt));
+        return list;
+    }
+
     public Grave createFromDeath(Player player, ItemStack[] snapshot, int experienceToStore) {
         Location safe = LocationUtil.findSafeGraveLocation(player.getLocation());
         enforceMaxGraves(player.getUniqueId());
@@ -125,6 +142,9 @@ public class GraveManager {
 
         ItemStack[] items = snapshot == null ? new ItemStack[0] : snapshot;
         String id = UUID.randomUUID().toString().substring(0, 8);
+        while (graves.containsKey(id)) {
+            id = UUID.randomUUID().toString().substring(0, 8);
+        }
         Grave grave = new Grave(
                 id,
                 player.getUniqueId(),
@@ -161,8 +181,11 @@ public class GraveManager {
             throw new IllegalArgumentException("Invalid grave location");
         }
 
+        long now = System.currentTimeMillis();
+        long created = createdAt > 0L ? createdAt : now;
+        // Fresh expiry window from import time. Old Ax dates + short TTL would wipe graves instantly.
         long expirationSeconds = plugin.getConfigManager().expirationSeconds();
-        long expiresAt = expirationSeconds <= 0 ? 0L : createdAt + (expirationSeconds * 1000L);
+        long expiresAt = expirationSeconds <= 0 ? 0L : now + (expirationSeconds * 1000L);
 
         String id = UUID.randomUUID().toString().substring(0, 8);
         while (graves.containsKey(id)) {
@@ -177,7 +200,7 @@ public class GraveManager {
                 safe,
                 items == null ? new ItemStack[0] : items,
                 Math.max(0, experience),
-                createdAt,
+                created,
                 expiresAt
         );
 
@@ -262,6 +285,7 @@ public class GraveManager {
         });
 
         grave.setMarkerUuid(marker.getUniqueId());
+        grave.setClickBoxUuid(clickBox.getUniqueId());
         markerIndex.put(marker.getUniqueId(), grave.getId());
         markerIndex.put(clickBox.getUniqueId(), grave.getId());
 
@@ -308,6 +332,17 @@ public class GraveManager {
             }
             grave.setMarkerUuid(null);
         }
+        UUID clickBoxUuid = grave.getClickBoxUuid();
+        if (clickBoxUuid != null) {
+            Entity entity = findEntity(grave, clickBoxUuid);
+            if (entity != null) {
+                entity.remove();
+            }
+            if (clearIndex) {
+                markerIndex.remove(clickBoxUuid);
+            }
+            grave.setClickBoxUuid(null);
+        }
     }
 
     /**
@@ -320,43 +355,58 @@ public class GraveManager {
             return;
         }
 
+        // Prevent duplication: only one player can interact at a time
+        if (!lockedGraves.add(grave.getId())) {
+            MessageService.send(player, plugin.getConfigManager().prefixed("denied"), placeholders(grave, 1));
+            return;
+        }
+
         playLootSound(player.getLocation());
         giveExperience(player, grave);
         hologram.update(grave);
 
         if (takeAll || plugin.getConfigManager().autoLoot()) {
-            boolean partial = restoreItemsArranged(player, grave);
-            if (grave.isEmpty()) {
-                MessageService.send(player, plugin.getConfigManager().prefixed("looted"), placeholders(grave, 1));
-                removeGrave(grave, false, false);
-            } else {
-                if (partial) {
-                    MessageService.send(player, plugin.getConfigManager().prefixed("looted-partial"), placeholders(grave, 1));
+            try {
+                boolean partial = restoreItemsArranged(player, grave);
+                if (grave.isEmpty()) {
+                    MessageService.send(player, plugin.getConfigManager().prefixed("looted"), placeholders(grave, 1));
+                    removeGrave(grave, false, false);
+                } else {
+                    if (partial) {
+                        MessageService.send(player, plugin.getConfigManager().prefixed("looted-partial"), placeholders(grave, 1));
+                    }
+                    hologram.update(grave);
+                    save();
                 }
-                hologram.update(grave);
-                save();
+            } finally {
+                lockedGraves.remove(grave.getId());
             }
             return;
         }
 
+        // GUI path: lock is released in handleGuiClose
         GraveGui gui = new GraveGui(plugin, grave);
         gui.open(player);
     }
 
     public void handleGuiClose(Player player, GraveGui gui) {
         Grave grave = gui.getGrave();
-        if (!graves.containsKey(grave.getId())) {
-            return;
-        }
+        try {
+            if (!graves.containsKey(grave.getId())) {
+                return;
+            }
 
-        gui.syncFromInventory();
+            gui.syncFromInventory();
 
-        if (grave.isEmpty()) {
-            MessageService.send(player, plugin.getConfigManager().prefixed("looted"), placeholders(grave, 1));
-            removeGrave(grave, false, false);
-        } else {
-            hologram.update(grave);
-            save();
+            if (grave.isEmpty()) {
+                MessageService.send(player, plugin.getConfigManager().prefixed("looted"), placeholders(grave, 1));
+                removeGrave(grave, false, false);
+            } else {
+                hologram.update(grave);
+                save();
+            }
+        } finally {
+            lockedGraves.remove(grave.getId());
         }
     }
 
@@ -411,31 +461,43 @@ public class GraveManager {
     }
 
     private boolean tryEquipArmor(PlayerInventory inv, ItemStack item) {
-        Material type = item.getType();
-        String name = type.name();
-        if (name.endsWith("_HELMET") || type == Material.PLAYER_HEAD || type == Material.CARVED_PUMPKIN
-                || type == Material.TURTLE_HELMET) {
-            if (isEmpty(inv.getHelmet())) {
-                inv.setHelmet(item);
-                return true;
-            }
-        } else if (name.endsWith("_CHESTPLATE") || type == Material.ELYTRA) {
-            if (isEmpty(inv.getChestplate())) {
-                inv.setChestplate(item);
-                return true;
-            }
-        } else if (name.endsWith("_LEGGINGS")) {
-            if (isEmpty(inv.getLeggings())) {
-                inv.setLeggings(item);
-                return true;
-            }
-        } else if (name.endsWith("_BOOTS")) {
-            if (isEmpty(inv.getBoots())) {
-                inv.setBoots(item);
-                return true;
-            }
+        EquipmentSlot slot;
+        try {
+            slot = item.getType().getEquipmentSlot();
+        } catch (Exception ignored) {
+            return false;
         }
-        return false;
+        return switch (slot) {
+            case HEAD -> {
+                if (isEmpty(inv.getHelmet())) {
+                    inv.setHelmet(item);
+                    yield true;
+                }
+                yield false;
+            }
+            case CHEST -> {
+                if (isEmpty(inv.getChestplate())) {
+                    inv.setChestplate(item);
+                    yield true;
+                }
+                yield false;
+            }
+            case LEGS -> {
+                if (isEmpty(inv.getLeggings())) {
+                    inv.setLeggings(item);
+                    yield true;
+                }
+                yield false;
+            }
+            case FEET -> {
+                if (isEmpty(inv.getBoots())) {
+                    inv.setBoots(item);
+                    yield true;
+                }
+                yield false;
+            }
+            default -> false;
+        };
     }
 
     private boolean isEmpty(ItemStack stack) {
@@ -467,21 +529,31 @@ public class GraveManager {
 
     public void removeGrave(Grave grave, boolean notifyOwner, boolean dropItems) {
         Location location = grave.getLocation();
-        if (dropItems && location != null && location.getWorld() != null) {
-            for (ItemStack item : grave.getItems()) {
-                if (item != null && !item.getType().isAir()) {
-                    location.getWorld().dropItemNaturally(location, item);
-                }
-            }
-        }
+
+        // Capture items before removing from map
+        ItemStack[] itemsToDrop = dropItems ? grave.getItems() : null;
 
         SchedulerUtils.runAtLocation(plugin, location == null ? plugin.getServer().getWorlds().get(0).getSpawnLocation() : location,
-                () -> removeVisuals(grave, true));
+                () -> {
+                    // Drop items on the correct region thread (Folia-safe)
+                    if (itemsToDrop != null && location != null && location.getWorld() != null) {
+                        for (ItemStack item : itemsToDrop) {
+                            if (item != null && !item.getType().isAir()) {
+                                location.getWorld().dropItemNaturally(location, item);
+                            }
+                        }
+                    }
+                    removeVisuals(grave, true);
+                });
 
         graves.remove(grave.getId());
         if (grave.getMarkerUuid() != null) {
             markerIndex.remove(grave.getMarkerUuid());
         }
+        if (grave.getClickBoxUuid() != null) {
+            markerIndex.remove(grave.getClickBoxUuid());
+        }
+        lockedGraves.remove(grave.getId());
         save();
 
         if (notifyOwner) {
@@ -500,13 +572,14 @@ public class GraveManager {
                 expired.add(grave);
             } else {
                 Location location = grave.getLocation();
-                if (location != null) {
-                    SchedulerUtils.runAtLocation(plugin, location, () -> hologram.update(grave));
-                    if (plugin.getConfigManager().particles() && location.getWorld() != null
-                            && location.getWorld().isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
-                        SchedulerUtils.runAtLocation(plugin, location, () ->
-                                location.getWorld().spawnParticle(Particle.SOUL, location.clone().add(0, 1.0, 0), 2, 0.15, 0.2, 0.15, 0.01));
-                    }
+                if (location != null && location.getWorld() != null) {
+                    SchedulerUtils.runAtLocation(plugin, location, () -> {
+                        hologram.update(grave);
+                        if (plugin.getConfigManager().particles()
+                                && location.getWorld().isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
+                            location.getWorld().spawnParticle(Particle.SOUL, location.clone().add(0, 1.0, 0), 2, 0.15, 0.2, 0.15, 0.01);
+                        }
+                    });
                 }
             }
         }
@@ -659,6 +732,7 @@ public class GraveManager {
     }
 
     public void shutdown() {
-        save();
+        storage.saveAllSync(graves.values());
+        storage.close();
     }
 }

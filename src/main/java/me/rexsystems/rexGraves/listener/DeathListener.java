@@ -43,6 +43,11 @@ public class DeathListener implements Listener {
             return;
         }
 
+        if (player.getLastDamageCause() != null
+                && plugin.getConfigManager().isDeathCauseBlacklisted(player.getLastDamageCause().getCause().name())) {
+            return;
+        }
+
         PlayerInventory inventory = player.getInventory();
         ItemStack[] contents = inventory.getContents();
         ItemStack[] snapshot = new ItemStack[contents.length];
