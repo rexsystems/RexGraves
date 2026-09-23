@@ -23,6 +23,7 @@ public class Grave {
     private float yaw;
     private float pitch;
     private ItemStack[] items;
+    private volatile String serializedItems;
     private int experience;
     private final long createdAt;
     private final long expiresAt;
@@ -44,7 +45,7 @@ public class Grave {
         this.ownerId = ownerId;
         this.ownerName = ownerName;
         setLocation(location);
-        this.items = items == null ? new ItemStack[0] : items;
+        setItems(items);
         this.experience = Math.max(0, experience);
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
@@ -119,8 +120,17 @@ public class Grave {
         return items;
     }
 
+    /**
+     * Items are serialized here, on the thread that changes them, so the deferred save
+     * (which may run on another thread under Folia) only reads an immutable string.
+     */
     public void setItems(ItemStack[] items) {
         this.items = items == null ? new ItemStack[0] : items;
+        this.serializedItems = ItemSerializer.serialize(this.items);
+    }
+
+    public String getSerializedItems() {
+        return serializedItems;
     }
 
     public int getExperience() {
@@ -216,7 +226,7 @@ public class Grave {
         section.set("experience", experience);
         section.set("created-at", createdAt);
         section.set("expires-at", expiresAt);
-        section.set("items", ItemSerializer.serialize(items));
+        section.set("items", getSerializedItems());
         section.set("marker-uuid", markerUuid == null ? null : markerUuid.toString());
         section.set("clickbox-uuid", clickBoxUuid == null ? null : clickBoxUuid.toString());
         List<String> holograms = new ArrayList<>();

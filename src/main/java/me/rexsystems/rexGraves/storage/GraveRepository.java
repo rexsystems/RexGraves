@@ -9,7 +9,11 @@ public interface GraveRepository {
 
     List<Grave> loadAll();
 
-    void saveAll(Collection<Grave> graves);
+    /**
+     * Snapshot now, write async.
+     * @param onFailure run (on the writer thread) if the write fails, so the caller can retry later
+     */
+    void saveAll(Collection<Grave> graves, Runnable onFailure);
 
     void saveAllSync(Collection<Grave> graves);
 

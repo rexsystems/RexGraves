@@ -11,10 +11,11 @@ public final class LocationUtil {
     }
 
     /**
-     * Find a safe grave location near the death point (void / lava / fire friendly).
-     * Void deaths stay on the same X/Z and use the first standable Y above world min height.
+     * Grave location = the exact death block (lava, fire, mid-air, anywhere).
+     * Only deaths below the world floor are moved: same X/Z, first standable Y above the void,
+     * because entities below min height get removed by the server.
      */
-    public static Location findSafeGraveLocation(Location origin) {
+    public static Location graveLocation(Location origin) {
         if (origin == null || origin.getWorld() == null) {
             return origin;
         }
@@ -22,11 +23,8 @@ public final class LocationUtil {
         World world = origin.getWorld();
         Location base = origin.clone();
 
-        if (isVoidDeath(base)) {
-            Location voidSafe = findAboveVoid(base);
-            if (voidSafe != null) {
-                return center(voidSafe);
-            }
+        if (base.getBlockY() < world.getMinHeight()) {
+            return center(findAboveVoid(base));
         }
 
         int minY = world.getMinHeight() + 1;
@@ -36,65 +34,7 @@ public final class LocationUtil {
         } else if (base.getBlockY() > maxY) {
             base.setY(maxY);
         }
-
-        if (isSafe(base)) {
-            return center(base);
-        }
-
-        for (int y = 0; y <= 16; y++) {
-            Location up = base.clone().add(0, y, 0);
-            if (isSafe(up)) {
-                return center(up);
-            }
-            Location down = base.clone().add(0, -y, 0);
-            if (y > 0 && isSafe(down)) {
-                return center(down);
-            }
-        }
-
-        for (int r = 1; r <= 4; r++) {
-            for (int x = -r; x <= r; x++) {
-                for (int z = -r; z <= r; z++) {
-                    if (Math.abs(x) != r && Math.abs(z) != r) {
-                        continue;
-                    }
-                    Location candidate = base.clone().add(x, 0, z);
-                    if (isSafe(candidate)) {
-                        return center(candidate);
-                    }
-                    for (int y = 1; y <= 8; y++) {
-                        Location up = candidate.clone().add(0, y, 0);
-                        if (isSafe(up)) {
-                            return center(up);
-                        }
-                    }
-                }
-            }
-        }
-
-        int highest = world.getHighestBlockYAt(base);
-        Location fallback = new Location(world, base.getX(), Math.max(highest + 1, minY), base.getZ());
-        return center(fallback);
-    }
-
-    private static boolean isVoidDeath(Location location) {
-        World world = location.getWorld();
-        if (world == null) {
-            return false;
-        }
-        int minHeight = world.getMinHeight();
-        if (location.getBlockY() < minHeight) {
-            return true;
-        }
-        int x = location.getBlockX();
-        int z = location.getBlockZ();
-        for (int y = location.getBlockY(); y >= minHeight; y--) {
-            Block block = world.getBlockAt(x, y, z);
-            if (block.getType().isSolid() || block.isLiquid()) {
-                return false;
-            }
-        }
-        return true;
+        return center(base);
     }
 
     /**
@@ -102,9 +42,6 @@ public final class LocationUtil {
      */
     private static Location findAboveVoid(Location origin) {
         World world = origin.getWorld();
-        if (world == null) {
-            return null;
-        }
         int minY = world.getMinHeight() + 1;
         int maxY = world.getMaxHeight() - 2;
         double x = origin.getX();
@@ -114,7 +51,7 @@ public final class LocationUtil {
 
         for (int y = minY; y <= maxY; y++) {
             Location candidate = new Location(world, x, y, z, yaw, pitch);
-            if (isSafe(candidate)) {
+            if (isStandable(candidate)) {
                 return candidate;
             }
         }
@@ -123,16 +60,7 @@ public final class LocationUtil {
         return new Location(world, x, minY, z, yaw, pitch);
     }
 
-    private static boolean isSafe(Location location) {
-        World world = location.getWorld();
-        if (world == null) {
-            return false;
-        }
-        int y = location.getBlockY();
-        if (y <= world.getMinHeight() || y >= world.getMaxHeight() - 1) {
-            return false;
-        }
-
+    private static boolean isStandable(Location location) {
         Block feet = location.getBlock();
         Block head = feet.getRelative(0, 1, 0);
         Block below = feet.getRelative(0, -1, 0);
@@ -140,7 +68,7 @@ public final class LocationUtil {
         if (!isPassable(feet) || !isPassable(head)) {
             return false;
         }
-        if (isDangerous(feet) || isDangerous(head) || isDangerous(below)) {
+        if (isDangerous(below)) {
             return false;
         }
         return below.getType().isSolid() || below.isLiquid();

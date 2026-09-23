@@ -7,6 +7,7 @@ import me.rexsystems.rexGraves.storage.GraveRepositoryFactory;
 import me.rexsystems.rexGraves.util.GraveKeys;
 import me.rexsystems.rexGraves.util.LocationUtil;
 import me.rexsystems.rexGraves.util.MessageService;
+import me.rexsystems.rexGraves.util.ExperienceUtils;
 import me.rexsystems.rexGraves.util.SchedulerUtils;
 import me.rexsystems.rexGraves.util.TimeFormat;
 import org.bukkit.Bukkit;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class GraveManager {
 
@@ -42,6 +44,10 @@ public class GraveManager {
     private final Map<String, Grave> graves = new ConcurrentHashMap<>();
     private final Map<UUID, String> markerIndex = new ConcurrentHashMap<>();
     private final java.util.Set<String> lockedGraves = ConcurrentHashMap.newKeySet();
+    private static final double VIEW_RANGE = 64.0;
+
+    private final AtomicBoolean dirty = new AtomicBoolean();
+    private final AtomicBoolean saveQueued = new AtomicBoolean();
 
     public GraveManager(RexGraves plugin) {
         this.plugin = plugin;
@@ -75,12 +81,31 @@ public class GraveManager {
         }
     }
 
+    /**
+     * Mark data dirty and write once on the next tick. Many saves in one tick (startup respawns,
+     * bulk imports, GUI clicks) collapse into a single snapshot + async write.
+     */
     public void save() {
-        storage.saveAll(graves.values());
+        dirty.set(true);
+        if (!plugin.isEnabled() || !saveQueued.compareAndSet(false, true)) {
+            return;
+        }
+        SchedulerUtils.runLater(plugin, () -> {
+            saveQueued.set(false);
+            flush();
+        }, 1L);
     }
 
+    /** Autosave entry point: only writes if something changed since the last write. */
     public void saveNow() {
-        storage.saveAll(graves.values());
+        flush();
+    }
+
+    private void flush() {
+        if (dirty.compareAndSet(true, false)) {
+            // Failed writes re-mark dirty so the next autosave retries instead of skipping.
+            storage.saveAll(graves.values(), () -> dirty.set(true));
+        }
     }
 
     public Collection<Grave> getAll() {
@@ -94,23 +119,9 @@ public class GraveManager {
         return Optional.ofNullable(graves.get(id));
     }
 
+    /** Fast index lookup only; callers holding the entity should fall back to its PDC tag. */
     public Optional<Grave> byMarker(UUID markerUuid) {
-        String id = markerIndex.get(markerUuid);
-        if (id != null) {
-            return get(id);
-        }
-        for (var world : Bukkit.getWorlds()) {
-            Entity entity = world.getEntity(markerUuid);
-            if (entity == null) {
-                continue;
-            }
-            String tagged = GraveKeys.readGraveId(entity.getPersistentDataContainer(), plugin);
-            if (tagged != null) {
-                markerIndex.put(markerUuid, tagged);
-                return get(tagged);
-            }
-        }
-        return Optional.empty();
+        return get(markerIndex.get(markerUuid));
     }
 
     public List<Grave> getByOwner(UUID ownerId) {
@@ -133,7 +144,7 @@ public class GraveManager {
     }
 
     public Grave createFromDeath(Player player, ItemStack[] snapshot, int experienceToStore) {
-        Location safe = LocationUtil.findSafeGraveLocation(player.getLocation());
+        Location safe = LocationUtil.graveLocation(player.getLocation());
         enforceMaxGraves(player.getUniqueId());
 
         long now = System.currentTimeMillis();
@@ -176,7 +187,7 @@ public class GraveManager {
      * Import an existing grave (e.g. AxGraves conversion). Spawns visuals and persists.
      */
     public Grave importGrave(UUID ownerId, String ownerName, Location location, ItemStack[] items, int experience, long createdAt) {
-        Location safe = location == null ? null : LocationUtil.findSafeGraveLocation(location);
+        Location safe = location == null ? null : LocationUtil.graveLocation(location);
         if (safe == null || safe.getWorld() == null) {
             throw new IllegalArgumentException("Invalid grave location");
         }
@@ -205,7 +216,10 @@ public class GraveManager {
         );
 
         graves.put(id, grave);
-        SchedulerUtils.runAtLocation(plugin, safe, () -> spawnVisuals(grave, true));
+        // Unloaded chunks get their visuals from handleEntitiesLoad; spawning now would force-load them.
+        if (safe.getWorld().isChunkLoaded(safe.getBlockX() >> 4, safe.getBlockZ() >> 4)) {
+            SchedulerUtils.runAtLocation(plugin, safe, () -> spawnVisuals(grave, true));
+        }
         save();
         return grave;
     }
@@ -292,9 +306,7 @@ public class GraveManager {
         List<UUID> holograms = hologram.spawn(grave);
         grave.setHologramUuids(holograms);
 
-        if (!fresh) {
-            save();
-        }
+        save();
     }
 
     private void clearNearbyTagged(Location location, String graveId) {
@@ -387,6 +399,28 @@ public class GraveManager {
         // GUI path: lock is released in handleGuiClose
         GraveGui gui = new GraveGui(plugin, grave);
         gui.open(player);
+        if (player.getOpenInventory().getTopInventory() != gui.getInventory()) {
+            // Another plugin cancelled the open; no close event will ever release the lock.
+            lockedGraves.remove(grave.getId());
+        }
+    }
+
+    /**
+     * Persist GUI changes right after each click (debounced to one save per tick) instead of
+     * only on close, so a crash with the GUI open cannot duplicate taken items.
+     */
+    public void scheduleGuiSync(Player player, GraveGui gui) {
+        if (!gui.markSyncPending()) {
+            return;
+        }
+        SchedulerUtils.runForPlayer(plugin, player, () -> {
+            gui.clearSyncPending();
+            if (!graves.containsKey(gui.getGrave().getId())) {
+                return;
+            }
+            gui.syncFromInventory();
+            save();
+        });
     }
 
     public void handleGuiClose(Player player, GraveGui gui) {
@@ -397,6 +431,15 @@ public class GraveManager {
             }
 
             gui.syncFromInventory();
+
+            if (!plugin.isEnabled()) {
+                // Shutdown: schedulers reject tasks now; shutdown() does the final sync save and
+                // leftover entities of removed graves are cleaned up on the next entities load.
+                if (grave.isEmpty()) {
+                    graves.remove(grave.getId());
+                }
+                return;
+            }
 
             if (grave.isEmpty()) {
                 MessageService.send(player, plugin.getConfigManager().prefixed("looted"), placeholders(grave, 1));
@@ -509,7 +552,7 @@ public class GraveManager {
         if (xp <= 0) {
             return;
         }
-        player.giveExp(xp);
+        ExperienceUtils.giveExp(player, xp);
         Map<String, String> placeholders = placeholders(grave, 1);
         placeholders.put("xp", String.valueOf(xp));
         MessageService.send(player, plugin.getConfigManager().prefixed("looted-xp"), placeholders);
@@ -572,15 +615,21 @@ public class GraveManager {
                 expired.add(grave);
             } else {
                 Location location = grave.getLocation();
-                if (location != null && location.getWorld() != null) {
-                    SchedulerUtils.runAtLocation(plugin, location, () -> {
-                        hologram.update(grave);
-                        if (plugin.getConfigManager().particles()
-                                && location.getWorld().isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
-                            location.getWorld().spawnParticle(Particle.SOUL, location.clone().add(0, 1.0, 0), 2, 0.15, 0.2, 0.15, 0.01);
-                        }
-                    });
+                // Unloaded graves have no entities to update; skip them entirely.
+                if (location == null || location.getWorld() == null
+                        || !location.getWorld().isChunkLoaded(location.getBlockX() >> 4, location.getBlockZ() >> 4)) {
+                    continue;
                 }
+                SchedulerUtils.runAtLocation(plugin, location, () -> {
+                    // Hologram text / particles only matter if someone can see them.
+                    if (location.getNearbyPlayers(VIEW_RANGE).isEmpty()) {
+                        return;
+                    }
+                    hologram.update(grave);
+                    if (plugin.getConfigManager().particles()) {
+                        location.getWorld().spawnParticle(Particle.SOUL, location.clone().add(0, 1.0, 0), 2, 0.15, 0.2, 0.15, 0.01);
+                    }
+                });
             }
         }
 
@@ -594,23 +643,23 @@ public class GraveManager {
         }
     }
 
-    public void handleChunkLoad(org.bukkit.Chunk chunk) {
-        for (Entity entity : chunk.getEntities()) {
+    /**
+     * Entities load separately from (and after) the chunk on Paper, so this runs on EntitiesLoadEvent.
+     * Tagged entities that are not the grave's current visuals are leftovers (e.g. from a crash
+     * before the new UUIDs were saved) and get removed so holograms never double up.
+     */
+    public void handleEntitiesLoad(org.bukkit.Chunk chunk, List<Entity> entities) {
+        for (Entity entity : entities) {
             String tagged = GraveKeys.readGraveId(entity.getPersistentDataContainer(), plugin);
             if (tagged == null) {
                 continue;
             }
-            if (!graves.containsKey(tagged)) {
-                entity.remove();
+            Grave grave = graves.get(tagged);
+            if (grave == null || !isCurrentVisual(grave, entity.getUniqueId())) {
                 markerIndex.remove(entity.getUniqueId());
+                entity.remove();
             } else if (entity instanceof ArmorStand || entity instanceof Interaction) {
                 markerIndex.put(entity.getUniqueId(), tagged);
-                if (entity instanceof ArmorStand) {
-                    Grave grave = graves.get(tagged);
-                    if (grave != null) {
-                        grave.setMarkerUuid(entity.getUniqueId());
-                    }
-                }
             }
         }
 
@@ -630,6 +679,12 @@ public class GraveManager {
                 SchedulerUtils.runAtLocation(plugin, location, () -> spawnVisuals(grave, false));
             }
         }
+    }
+
+    private boolean isCurrentVisual(Grave grave, UUID uuid) {
+        return uuid.equals(grave.getMarkerUuid())
+                || uuid.equals(grave.getClickBoxUuid())
+                || grave.getHologramUuids().contains(uuid);
     }
 
     public Optional<Grave> nearest(Player player) {
@@ -732,6 +787,12 @@ public class GraveManager {
     }
 
     public void shutdown() {
+        // Close open GUIs so nobody keeps taking items after the final save (handleGuiClose syncs them).
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            if (player.getOpenInventory().getTopInventory().getHolder() instanceof GraveGui) {
+                player.closeInventory();
+            }
+        }
         storage.saveAllSync(graves.values());
         storage.close();
     }

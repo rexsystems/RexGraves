@@ -19,10 +19,11 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
 public abstract class SqlGraveRepository implements GraveRepository {
@@ -32,6 +33,10 @@ public abstract class SqlGraveRepository implements GraveRepository {
     protected final RexGraves plugin;
     protected final HikariDataSource dataSource;
     private final Object saveLock = new Object();
+    private final AtomicLong generations = new AtomicLong();
+    private long writtenGeneration;
+    /** id -> content hash of the last committed write; null = unknown, reload ids from the DB. */
+    private Map<String, Integer> writtenRows;
 
     protected SqlGraveRepository(RexGraves plugin, HikariDataSource dataSource) {
         this.plugin = plugin;
@@ -161,11 +166,12 @@ public abstract class SqlGraveRepository implements GraveRepository {
     }
 
     @Override
-    public void saveAll(Collection<Grave> graves) {
+    public void saveAll(Collection<Grave> graves, Runnable onFailure) {
         List<GraveSnapshot> snapshot = GraveSnapshot.from(graves);
+        long generation = generations.incrementAndGet();
         SchedulerUtils.runAsync(plugin, () -> {
-            synchronized (saveLock) {
-                writeRowsSync(snapshot);
+            if (!write(snapshot, generation)) {
+                onFailure.run();
             }
         });
     }
@@ -173,8 +179,23 @@ public abstract class SqlGraveRepository implements GraveRepository {
     @Override
     public void saveAllSync(Collection<Grave> graves) {
         List<GraveSnapshot> snapshot = GraveSnapshot.from(graves);
+        write(snapshot, generations.incrementAndGet());
+    }
+
+    /**
+     * Async tasks can run out of order; never let an older snapshot overwrite a newer one.
+     * @return false only if the write itself failed
+     */
+    private boolean write(List<GraveSnapshot> snapshot, long generation) {
         synchronized (saveLock) {
-            writeRowsSync(snapshot);
+            if (generation <= writtenGeneration) {
+                return true;
+            }
+            if (!writeRowsSync(snapshot)) {
+                return false;
+            }
+            writtenGeneration = generation;
+            return true;
         }
     }
 
@@ -185,50 +206,75 @@ public abstract class SqlGraveRepository implements GraveRepository {
         }
     }
 
-    private void writeRowsSync(List<GraveSnapshot> snapshots) {
+    /**
+     * Only upserts rows whose content changed since the last successful write and only deletes
+     * rows that disappeared. Row state is re-read from the DB after startup or a failed write.
+     */
+    private boolean writeRowsSync(List<GraveSnapshot> snapshots) {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
             try {
-                Set<String> keep = new HashSet<>();
-                try (PreparedStatement upsert = connection.prepareStatement(upsertSql())) {
-                    for (GraveSnapshot row : snapshots) {
-                        keep.add(row.id);
-                        bindUpsert(upsert, row);
-                        upsert.addBatch();
+                Map<String, Integer> known = writtenRows;
+                if (known == null) {
+                    known = new HashMap<>();
+                    try (PreparedStatement select = connection.prepareStatement("SELECT id FROM " + TABLE);
+                         ResultSet rs = select.executeQuery()) {
+                        while (rs.next()) {
+                            known.put(rs.getString(1), null);
+                        }
                     }
-                    upsert.executeBatch();
                 }
 
-                try (PreparedStatement select = connection.prepareStatement("SELECT id FROM " + TABLE);
-                     ResultSet rs = select.executeQuery()) {
-                    List<String> remove = new ArrayList<>();
-                    while (rs.next()) {
-                        String id = rs.getString(1);
-                        if (!keep.contains(id)) {
-                            remove.add(id);
+                Map<String, Integer> next = new HashMap<>();
+                try (PreparedStatement upsert = connection.prepareStatement(upsertSql())) {
+                    boolean any = false;
+                    for (GraveSnapshot row : snapshots) {
+                        int hash = row.contentHash();
+                        next.put(row.id, hash);
+                        Integer previous = known.get(row.id);
+                        if (previous != null && previous == hash) {
+                            continue;
                         }
+                        bindUpsert(upsert, row);
+                        upsert.addBatch();
+                        any = true;
                     }
-                    if (!remove.isEmpty()) {
-                        try (PreparedStatement delete = connection.prepareStatement(
-                                "DELETE FROM " + TABLE + " WHERE id = ?")) {
-                            for (String id : remove) {
-                                delete.setString(1, id);
-                                delete.addBatch();
-                            }
-                            delete.executeBatch();
+                    if (any) {
+                        upsert.executeBatch();
+                    }
+                }
+
+                List<String> remove = new ArrayList<>();
+                for (String id : known.keySet()) {
+                    if (!next.containsKey(id)) {
+                        remove.add(id);
+                    }
+                }
+                if (!remove.isEmpty()) {
+                    try (PreparedStatement delete = connection.prepareStatement(
+                            "DELETE FROM " + TABLE + " WHERE id = ?")) {
+                        for (String id : remove) {
+                            delete.setString(1, id);
+                            delete.addBatch();
                         }
+                        delete.executeBatch();
                     }
                 }
 
                 connection.commit();
+                writtenRows = next;
             } catch (SQLException e) {
+                writtenRows = null;
                 connection.rollback();
                 throw e;
             } finally {
                 connection.setAutoCommit(true);
             }
+            return true;
         } catch (SQLException e) {
+            writtenRows = null;
             plugin.getLogger().log(Level.SEVERE, "Failed to save graves to SQL", e);
+            return false;
         }
     }
 

@@ -13,6 +13,7 @@ import org.jetbrains.annotations.NotNull;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Grave loot GUI mirroring the stored inventory slot layout.
@@ -22,6 +23,7 @@ public class GraveGui implements InventoryHolder {
     private final RexGraves plugin;
     private final Grave grave;
     private final Inventory inventory;
+    private final AtomicBoolean syncPending = new AtomicBoolean();
 
     public GraveGui(RexGraves plugin, Grave grave) {
         this.plugin = plugin;
@@ -52,6 +54,15 @@ public class GraveGui implements InventoryHolder {
 
     public Grave getGrave() {
         return grave;
+    }
+
+    /** @return true if the caller should schedule a sync (none pending yet) */
+    public boolean markSyncPending() {
+        return syncPending.compareAndSet(false, true);
+    }
+
+    public void clearSyncPending() {
+        syncPending.set(false);
     }
 
     public void open(Player player) {

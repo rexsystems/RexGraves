@@ -9,7 +9,8 @@ settings:
   enabled: true
   # Store XP in the grave and restore it when looted
   store-experience: true
-  # Percent of XP to store (0-100)
+  # Percent of the player's TOTAL experience to store (0-100).
+  # This is real XP points / levels, not vanilla death-drop XP (which is capped at 100).
   experience-percent: 100
   # How long graves last, in seconds. 0 = never expire
   expiration-seconds: 3600

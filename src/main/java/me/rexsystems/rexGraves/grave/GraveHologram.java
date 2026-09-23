@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * One TextDisplay hologram with multiple lines (newline-separated).
@@ -24,6 +25,8 @@ import java.util.UUID;
 public class GraveHologram {
 
     private final RexGraves plugin;
+    /** Last text pushed per grave, so unchanged holograms skip MiniMessage parsing and entity updates. */
+    private final Map<String, String> lastRendered = new ConcurrentHashMap<>();
 
     public GraveHologram(RexGraves plugin) {
         this.plugin = plugin;
@@ -79,12 +82,19 @@ public class GraveHologram {
             return;
         }
         Entity entity = findEntity(grave, holograms.get(0));
-        if (entity instanceof TextDisplay display) {
-            display.text(buildText(grave));
+        if (!(entity instanceof TextDisplay display)) {
+            return;
         }
+        List<String> rendered = renderLines(grave);
+        String key = String.join("\n", rendered);
+        if (key.equals(lastRendered.put(grave.getId(), key))) {
+            return;
+        }
+        display.text(toComponent(rendered));
     }
 
     public void remove(Grave grave) {
+        lastRendered.remove(grave.getId());
         Location location = grave.getLocation();
         for (UUID uuid : new ArrayList<>(grave.getHologramUuids())) {
             Entity entity = findEntity(grave, uuid);
@@ -103,20 +113,34 @@ public class GraveHologram {
     }
 
     private Component buildText(Grave grave) {
+        List<String> rendered = renderLines(grave);
+        lastRendered.put(grave.getId(), String.join("\n", rendered));
+        return toComponent(rendered);
+    }
+
+    private List<String> renderLines(Grave grave) {
         List<String> lines = plugin.getConfigManager().hologramLines();
         Map<String, String> placeholders = plugin.getGraveManager().placeholders(grave, 1);
         OfflinePlayer owner = Bukkit.getOfflinePlayer(grave.getOwnerId());
 
-        Component text = Component.empty();
-        boolean first = true;
+        List<String> rendered = new ArrayList<>(lines.size());
         for (String raw : lines) {
             if (raw == null || raw.isBlank()) {
                 continue;
             }
+            rendered.add(renderLine(raw, placeholders, owner));
+        }
+        return rendered;
+    }
+
+    private static Component toComponent(List<String> rendered) {
+        Component text = Component.empty();
+        boolean first = true;
+        for (String line : rendered) {
             if (!first) {
                 text = text.append(Component.newline());
             }
-            text = text.append(MessageService.parse(renderLine(raw, placeholders, owner)));
+            text = text.append(MessageService.parse(line));
             first = false;
         }
         return text;

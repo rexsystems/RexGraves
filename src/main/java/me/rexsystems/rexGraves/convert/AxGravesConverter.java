@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.JsonSyntaxException;
 import me.rexsystems.rexGraves.RexGraves;
 import me.rexsystems.rexGraves.grave.Grave;
+import me.rexsystems.rexGraves.util.SchedulerUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -21,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.logging.Level;
 
 /**
@@ -29,7 +31,11 @@ import java.util.logging.Level;
  */
 public final class AxGravesConverter {
 
-    private static final Gson GSON = new GsonBuilder().create();
+    private static final Gson GSON;
+
+    static {
+        GSON = new GsonBuilder().create();
+    }
 
     private final RexGraves plugin;
 
@@ -53,19 +59,28 @@ public final class AxGravesConverter {
         return axData;
     }
 
-    public Result convert(File file) {
-        if (file == null || !file.isFile()) {
-            return Result.missing(file);
-        }
+    /**
+     * File IO + JSON parse off the server thread, then grave creation (items, entities) back on it.
+     */
+    public void convertAsync(File file, Consumer<Result> callback) {
+        SchedulerUtils.runAsync(plugin, () -> {
+            if (file == null || !file.isFile()) {
+                SchedulerUtils.runSync(plugin, () -> callback.accept(Result.missing(file)));
+                return;
+            }
+            SavedGrave[] saved;
+            try (FileReader reader = new FileReader(file, StandardCharsets.UTF_8)) {
+                saved = GSON.fromJson(reader, SavedGrave[].class);
+            } catch (IOException | JsonSyntaxException e) {
+                plugin.getLogger().log(Level.WARNING, "Failed to read AxGraves data from " + file.getAbsolutePath(), e);
+                SchedulerUtils.runSync(plugin, () -> callback.accept(Result.failed(file, e.getMessage())));
+                return;
+            }
+            SchedulerUtils.runSync(plugin, () -> callback.accept(apply(file, saved)));
+        });
+    }
 
-        SavedGrave[] saved;
-        try (FileReader reader = new FileReader(file, StandardCharsets.UTF_8)) {
-            saved = GSON.fromJson(reader, SavedGrave[].class);
-        } catch (IOException | JsonSyntaxException e) {
-            plugin.getLogger().log(Level.WARNING, "Failed to read AxGraves data from " + file.getAbsolutePath(), e);
-            return Result.failed(file, e.getMessage());
-        }
-
+    private Result apply(File file, SavedGrave[] saved) {
         if (saved == null || saved.length == 0) {
             return Result.empty(file);
         }

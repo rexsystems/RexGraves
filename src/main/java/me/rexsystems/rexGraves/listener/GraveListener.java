@@ -15,11 +15,13 @@ import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
 import org.bukkit.event.entity.EntityDamageEvent;
+import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.inventory.InventoryDragEvent;
 import org.bukkit.event.player.PlayerArmorStandManipulateEvent;
 import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
-import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.event.world.EntitiesLoadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 
 import java.util.HashMap;
@@ -84,8 +86,7 @@ public class GraveListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onArmorStandManipulate(PlayerArmorStandManipulateEvent event) {
-        Optional<Grave> graveOpt = plugin.getGraveManager().byMarker(event.getRightClicked().getUniqueId());
-        if (graveOpt.isPresent()) {
+        if (resolveGrave(event.getRightClicked()).isPresent()) {
             event.setCancelled(true);
         }
     }
@@ -171,9 +172,25 @@ public class GraveListener implements Listener {
         plugin.getGraveManager().handleGuiClose(player, gui);
     }
 
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryClick(InventoryClickEvent event) {
+        if (event.getWhoClicked() instanceof Player player
+                && event.getView().getTopInventory().getHolder() instanceof GraveGui gui) {
+            plugin.getGraveManager().scheduleGuiSync(player, gui);
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onInventoryDrag(InventoryDragEvent event) {
+        if (event.getWhoClicked() instanceof Player player
+                && event.getView().getTopInventory().getHolder() instanceof GraveGui gui) {
+            plugin.getGraveManager().scheduleGuiSync(player, gui);
+        }
+    }
+
     @EventHandler
-    public void onChunkLoad(ChunkLoadEvent event) {
-        plugin.getGraveManager().handleChunkLoad(event.getChunk());
+    public void onEntitiesLoad(EntitiesLoadEvent event) {
+        plugin.getGraveManager().handleEntitiesLoad(event.getChunk(), event.getEntities());
     }
 
     private record PendingBreak(String graveId, boolean drop, long timestamp) {

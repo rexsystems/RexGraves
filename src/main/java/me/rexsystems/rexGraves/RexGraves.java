@@ -56,6 +56,9 @@ public final class RexGraves extends JavaPlugin {
                 getLogger().info("PlaceholderAPI expansion registered!");
             }
 
+            // Touch convert class early so missing deps fail at enable, not mid-command.
+            Class.forName("me.rexsystems.rexGraves.convert.AxGravesConverter");
+
             getLogger().info("RexGraves has been enabled successfully!");
         } catch (Exception e) {
             getLogger().severe("Failed to enable RexGraves: " + e.getMessage());

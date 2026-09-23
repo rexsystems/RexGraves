@@ -1,16 +1,15 @@
 package me.rexsystems.rexGraves.storage;
 
 import me.rexsystems.rexGraves.grave.Grave;
-import me.rexsystems.rexGraves.util.ItemSerializer;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * Immutable row built on the calling thread so item serialization stays off the async writer.
+ * Immutable row built on the calling thread; the async writer never touches live Grave/ItemStack objects.
  */
 public final class GraveSnapshot {
 
@@ -44,12 +43,17 @@ public final class GraveSnapshot {
         this.experience = grave.getExperience();
         this.createdAt = grave.getCreatedAt();
         this.expiresAt = grave.getExpiresAt();
-        this.items = ItemSerializer.serialize(grave.getItems());
+        this.items = grave.getSerializedItems();
         this.markerUuid = grave.getMarkerUuid() == null ? null : grave.getMarkerUuid().toString();
         this.clickBoxUuid = grave.getClickBoxUuid() == null ? null : grave.getClickBoxUuid().toString();
         this.hologramUuids = grave.getHologramUuids().stream()
                 .map(UUID::toString)
                 .collect(Collectors.joining(","));
+    }
+
+    public int contentHash() {
+        return Objects.hash(id, ownerId, ownerName, world, x, y, z, yaw, pitch, experience,
+                createdAt, expiresAt, items, markerUuid, clickBoxUuid, hologramUuids);
     }
 
     public static List<GraveSnapshot> from(Collection<Grave> graves) {

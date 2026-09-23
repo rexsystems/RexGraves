@@ -18,6 +18,7 @@ import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 
 public final class YamlGraveRepository implements GraveRepository {
@@ -25,6 +26,8 @@ public final class YamlGraveRepository implements GraveRepository {
     private final RexGraves plugin;
     private final File file;
     private final Object saveLock = new Object();
+    private final AtomicLong generations = new AtomicLong();
+    private long writtenGeneration;
 
     public YamlGraveRepository(RexGraves plugin) {
         this.plugin = plugin;
@@ -82,11 +85,12 @@ public final class YamlGraveRepository implements GraveRepository {
     }
 
     @Override
-    public void saveAll(Collection<Grave> graves) {
+    public void saveAll(Collection<Grave> graves, Runnable onFailure) {
         YamlConfiguration snapshot = buildSnapshot(graves);
+        long generation = generations.incrementAndGet();
         SchedulerUtils.runAsync(plugin, () -> {
-            synchronized (saveLock) {
-                writeSnapshot(snapshot);
+            if (!write(snapshot, generation)) {
+                onFailure.run();
             }
         });
     }
@@ -94,8 +98,23 @@ public final class YamlGraveRepository implements GraveRepository {
     @Override
     public void saveAllSync(Collection<Grave> graves) {
         YamlConfiguration snapshot = buildSnapshot(graves);
+        write(snapshot, generations.incrementAndGet());
+    }
+
+    /**
+     * Async tasks can run out of order; never let an older snapshot overwrite a newer one.
+     * @return false only if the write itself failed
+     */
+    private boolean write(YamlConfiguration snapshot, long generation) {
         synchronized (saveLock) {
-            writeSnapshot(snapshot);
+            if (generation <= writtenGeneration) {
+                return true;
+            }
+            if (!writeSnapshot(snapshot)) {
+                return false;
+            }
+            writtenGeneration = generation;
+            return true;
         }
     }
 
@@ -133,7 +152,7 @@ public final class YamlGraveRepository implements GraveRepository {
         return snapshot;
     }
 
-    private void writeSnapshot(YamlConfiguration snapshot) {
+    private boolean writeSnapshot(YamlConfiguration snapshot) {
         Path target = file.toPath();
         Path temp = target.resolveSibling(file.getName() + ".tmp");
         try {
@@ -150,12 +169,14 @@ public final class YamlGraveRepository implements GraveRepository {
             } catch (IOException atomicFailed) {
                 Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
             }
+            return true;
         } catch (IOException e) {
             plugin.getLogger().log(Level.SEVERE, "Failed to save graves.yml", e);
             try {
                 Files.deleteIfExists(temp);
             } catch (IOException ignored) {
             }
+            return false;
         }
     }
 }

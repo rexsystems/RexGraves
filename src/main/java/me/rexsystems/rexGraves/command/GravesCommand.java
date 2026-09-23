@@ -284,25 +284,27 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
             file = AxGravesConverter.resolveDefaultFile(plugin);
         }
 
-        AxGravesConverter.Result result = new AxGravesConverter(plugin).convert(file);
-        Map<String, String> placeholders = new HashMap<>();
-        placeholders.put("path", file.getAbsolutePath());
-        placeholders.put("imported", String.valueOf(result.imported()));
-        placeholders.put("skipped", String.valueOf(result.skipped()));
-        placeholders.put("error", result.error() == null ? "" : result.error());
+        File target = file;
+        new AxGravesConverter(plugin).convertAsync(target, result -> {
+            Map<String, String> placeholders = new HashMap<>();
+            placeholders.put("path", target.getAbsolutePath());
+            placeholders.put("imported", String.valueOf(result.imported()));
+            placeholders.put("skipped", String.valueOf(result.skipped()));
+            placeholders.put("error", result.error() == null ? "" : result.error());
 
-        if (!file.isFile()) {
-            MessageService.send(sender, plugin.getConfigManager().prefixed("convert-missing"), placeholders);
-            return true;
-        }
-        if (!result.success()) {
-            MessageService.send(sender, plugin.getConfigManager().prefixed("convert-failed"), placeholders);
-            return true;
-        }
+            if (!target.isFile()) {
+                MessageService.send(sender, plugin.getConfigManager().prefixed("convert-missing"), placeholders);
+                return;
+            }
+            if (!result.success()) {
+                MessageService.send(sender, plugin.getConfigManager().prefixed("convert-failed"), placeholders);
+                return;
+            }
 
-        MessageService.send(sender, plugin.getConfigManager().prefixed("convert-done"), placeholders);
-        plugin.getLogger().info("AxGraves convert: imported " + result.imported()
-                + ", skipped " + result.skipped() + " from " + file.getAbsolutePath());
+            MessageService.send(sender, plugin.getConfigManager().prefixed("convert-done"), placeholders);
+            plugin.getLogger().info("AxGraves convert: imported " + result.imported()
+                    + ", skipped " + result.skipped() + " from " + target.getAbsolutePath());
+        });
         return true;
     }
 
@@ -312,30 +314,44 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
         // /admin list
         // /admin list <page>
         // /admin list <player> [page]
-        OfflinePlayer target = null;
-        int page = 1;
-
-        if (args.length >= 3) {
-            if (isPositiveInt(args[2])) {
-                page = Integer.parseInt(args[2]);
-            } else {
-                target = resolveKnownPlayer(args[2]);
-                if (target == null) {
-                    Map<String, String> missing = new HashMap<>();
-                    missing.put("player", args[2]);
-                    MessageService.send(sender, plugin.getConfigManager().prefixed("admin-player-not-found"), missing);
-                    return true;
-                }
-                if (args.length >= 4) {
-                    if (!isPositiveInt(args[3])) {
-                        MessageService.send(sender, plugin.getConfigManager().prefixed("admin-list-usage"));
-                        return true;
-                    }
-                    page = Integer.parseInt(args[3]);
-                }
-            }
+        if (args.length < 3 || isPositiveInt(args[2])) {
+            int page = args.length >= 3 ? Integer.parseInt(args[2]) : 1;
+            return sendAdminList(sender, args, null, page);
         }
 
+        int page = 1;
+        if (args.length >= 4) {
+            if (!isPositiveInt(args[3])) {
+                MessageService.send(sender, plugin.getConfigManager().prefixed("admin-list-usage"));
+                return true;
+            }
+            page = Integer.parseInt(args[3]);
+        }
+
+        String name = args[2];
+        OfflinePlayer fast = resolveKnownPlayerFast(name);
+        if (fast != null) {
+            return sendAdminList(sender, args, fast, page);
+        }
+
+        // Scanning every offline player reads player data from disk; keep it off the server thread.
+        int finalPage = page;
+        SchedulerUtils.runAsync(plugin, () -> {
+            OfflinePlayer found = scanOfflinePlayers(name);
+            SchedulerUtils.runSync(plugin, () -> {
+                if (found == null) {
+                    Map<String, String> missing = new HashMap<>();
+                    missing.put("player", name);
+                    MessageService.send(sender, plugin.getConfigManager().prefixed("admin-player-not-found"), missing);
+                    return;
+                }
+                sendAdminList(sender, args, found, finalPage);
+            });
+        });
+        return true;
+    }
+
+    private boolean sendAdminList(CommandSender sender, String[] args, OfflinePlayer target, int page) {
         List<Grave> graves = target == null
                 ? plugin.getGraveManager().getAllSorted()
                 : plugin.getGraveManager().getByOwner(target.getUniqueId());
@@ -417,7 +433,7 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
      * Resolve a real known player: online, grave owner match, or hasPlayedBefore.
      * Avoids inventing offline UUIDs for random names.
      */
-    private OfflinePlayer resolveKnownPlayer(String name) {
+    private OfflinePlayer resolveKnownPlayerFast(String name) {
         if (name == null || name.isBlank()) {
             return null;
         }
@@ -441,7 +457,10 @@ public class GravesCommand implements CommandExecutor, TabCompleter {
             }
         } catch (IllegalArgumentException ignored) {
         }
+        return null;
+    }
 
+    private static OfflinePlayer scanOfflinePlayers(String name) {
         for (OfflinePlayer offline : Bukkit.getOfflinePlayers()) {
             if (offline.getName() != null && offline.getName().equalsIgnoreCase(name)
                     && (offline.hasPlayedBefore() || offline.isOnline())) {
