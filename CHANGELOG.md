@@ -2,6 +2,13 @@
 
 All notable changes to RexGraves are documented in this file.
 
+## [1.0.2] - 2026-09-24
+
+### Added
+- `settings.public-access` (off by default): graves become lootable by anyone after `after-seconds` (default 24h)
+- `{public_in}` / `%rexgraves_nearest_public_in%` placeholder and `denied-public-in` message showing when a grave becomes public
+- Startup/reload warning when graves would expire before becoming public
+
 ## [1.0.1] - 2026-09-19
 
 ### Added

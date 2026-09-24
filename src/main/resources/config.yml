@@ -28,6 +28,11 @@ settings:
   protect-from-explosions: true
   # Only the owner (or bypass) can open a grave
   owner-only: true
+  # After this delay anyone can open and loot the grave (owner-only no longer applies).
+  # Pair with a longer expiration-seconds (e.g. 172800) or 0 so graves live long enough.
+  public-access:
+    enabled: false
+    after-seconds: 86400
   # Spawn a player head on the grave marker
   player-head: true
   # Small floating marker entity
@@ -76,7 +81,7 @@ hologram:
   # Unused for single multi-line holograms (kept for compatibility)
   line-spacing: 0.28
   # One hologram, multiple lines. Placeholders: {player} {owner} {items} {xp} {world} {x} {y} {z} {id}
-  # {time_left} {time_since} {since_died} {died_ago}
+  # {time_left} {time_since} {since_died} {died_ago} {public_in}
   # PlaceholderAPI placeholders also work when PAPI is installed
   lines:
     - "<gradient:#8B7355:#C4A574><bold>{player}'s Grave</bold></gradient>"
@@ -99,6 +104,8 @@ messages:
   looted-partial: "<prefix><yellow>Some items didn't fit. Your grave still has the rest.</yellow>"
   looted-xp: "<prefix><gray>Restored <white>{xp}</white> XP.</gray>"
   denied: "<prefix><red>That grave belongs to <white>{owner}</white>.</red>"
+  # Used instead of "denied" while public-access is enabled and the grave is not public yet
+  denied-public-in: "<prefix><red>That grave belongs to <white>{owner}</white>.</red> <gray>Anyone can loot it in <white>{public_in}</white>.</gray>"
   not-found: "<prefix><red>Grave not found.</red>"
   none: "<prefix><gray>You have no active graves.</gray>"
   list-header: "<prefix><gray>Your graves <dark_gray>(</dark_gray><white>{count}</white><dark_gray>)</dark_gray>:</gray>"
@@ -131,4 +138,6 @@ messages:
   break-confirm-destroy: "<prefix><red>Hit again to <white>destroy</white> <white>{owner}</white>'s grave. <bold>Items will be lost!</bold></red>"
   time-never: "Never expires"
   time-expired: "Expired"
+  # Shown by {public_in} once a grave is open to everyone (public-access)
+  time-public: "Public"
   time-format: "{hours}h {minutes}m {seconds}s"

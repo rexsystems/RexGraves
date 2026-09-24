@@ -363,7 +363,8 @@ public class GraveManager {
     public void openGrave(Player player, Grave grave, boolean takeAll) {
         if (!canAccess(player, grave)) {
             Map<String, String> placeholders = placeholders(grave, 1);
-            MessageService.send(player, plugin.getConfigManager().prefixed("denied"), placeholders);
+            String key = plugin.getConfigManager().publicAccessEnabled() ? "denied-public-in" : "denied";
+            MessageService.send(player, plugin.getConfigManager().prefixed(key), placeholders);
             return;
         }
 
@@ -567,7 +568,28 @@ public class GraveManager {
         if (player.getUniqueId().equals(grave.getOwnerId())) {
             return true;
         }
-        return player.hasPermission("rexgraves.bypass") || player.hasPermission("rexgraves.admin");
+        if (player.hasPermission("rexgraves.bypass") || player.hasPermission("rexgraves.admin")) {
+            return true;
+        }
+        return isPublic(grave, System.currentTimeMillis());
+    }
+
+    public boolean isPublic(Grave grave, long now) {
+        var config = plugin.getConfigManager();
+        return config.publicAccessEnabled() && grave.isPublic(now, config.publicAccessAfterSeconds() * 1000L);
+    }
+
+    /** Formatted time until the grave becomes public, "Public" once it is, empty when the feature is off. */
+    public String publicIn(Grave grave, long now) {
+        var config = plugin.getConfigManager();
+        if (!config.publicAccessEnabled()) {
+            return "";
+        }
+        if (isPublic(grave, now)) {
+            return config.message("time-public");
+        }
+        long remaining = grave.getCreatedAt() + config.publicAccessAfterSeconds() * 1000L - now;
+        return TimeFormat.formatDuration(remaining, config.message("time-format"));
     }
 
     public void removeGrave(Grave grave, boolean notifyOwner, boolean dropItems) {
@@ -728,6 +750,7 @@ public class GraveManager {
         );
         String timeSince = TimeFormat.formatElapsed(Math.max(0L, now - grave.getCreatedAt()), timePattern);
 
+        map.put("public_in", publicIn(grave, now));
         map.put("time_left", timeLeft);
         map.put("time_since", timeSince);
         map.put("since_died", timeSince);

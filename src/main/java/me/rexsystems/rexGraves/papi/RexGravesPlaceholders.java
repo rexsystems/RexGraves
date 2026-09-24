@@ -67,6 +67,9 @@ public class RexGravesPlaceholders extends PlaceholderExpansion {
             case "nearest_time_since", "time_since", "since_died", "died_ago" -> nearest(player, graves)
                     .map(this::formatTimeSince)
                     .orElse("");
+            case "nearest_public_in", "public_in" -> nearest(player, graves)
+                    .map(g -> plugin.getGraveManager().publicIn(g, System.currentTimeMillis()))
+                    .orElse("");
             case "nearest_distance", "distance" -> distance(player, graves);
             default -> null;
         };

@@ -157,6 +157,10 @@ public class Grave {
         return !neverExpires() && now >= expiresAt;
     }
 
+    public boolean isPublic(long now, long afterMillis) {
+        return now - createdAt >= afterMillis;
+    }
+
     public long remainingMillis(long now) {
         if (neverExpires()) {
             return -1L;

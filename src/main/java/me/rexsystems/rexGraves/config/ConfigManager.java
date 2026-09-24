@@ -26,6 +26,16 @@ public class ConfigManager {
         new ConfigAutoUpdater(plugin).update();
         plugin.reloadConfig();
         this.config = plugin.getConfig();
+        warnIfExpiresBeforePublic();
+    }
+
+    private void warnIfExpiresBeforePublic() {
+        long expiration = expirationSeconds();
+        if (publicAccessEnabled() && expiration > 0 && expiration <= publicAccessAfterSeconds()) {
+            plugin.getLogger().warning("settings.public-access is enabled, but expiration-seconds (" + expiration
+                    + ") <= public-access.after-seconds (" + publicAccessAfterSeconds()
+                    + "): graves expire before anyone else can loot them.");
+        }
     }
 
     public void reload() {
@@ -78,6 +88,14 @@ public class ConfigManager {
 
     public boolean ownerOnly() {
         return config.getBoolean("settings.owner-only", true);
+    }
+
+    public boolean publicAccessEnabled() {
+        return config.getBoolean("settings.public-access.enabled", false);
+    }
+
+    public long publicAccessAfterSeconds() {
+        return Math.max(0L, config.getLong("settings.public-access.after-seconds", 86400L));
     }
 
     public boolean playerHead() {
